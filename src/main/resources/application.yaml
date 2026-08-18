@@ -16,3 +16,14 @@ spring:
 
 server:
   port: 8080
+
+sup2i:
+  security:
+    local-provider-code: local
+    
+    jwt:
+      issuer: sup2i-food-backend
+      access-token-ttl: 15m
+      secret-base64: ${SUP2I_JWT_SECRET_BASE64}
+
+    refresh-token-ttl: 30d

@@ -1,11 +1,13 @@
 package com.sup2i.food.common.api;
 
+import com.sup2i.food.security.exception.AccountBlockedException;
+import com.sup2i.food.security.exception.AccountSuspendedException;
+import com.sup2i.food.security.exception.LoginRateLimitedException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.CredentialsExpiredException;
-import org.springframework.security.authentication.DisabledException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -61,14 +63,42 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(DisabledException.class)
-    public ResponseEntity<ApiErrorResponse> disabled(
-        DisabledException exception,
+    @ExceptionHandler(AccountBlockedException.class)
+    public ResponseEntity<ApiErrorResponse> blocked(
+        AccountBlockedException exception,
         HttpServletRequest request
     ) {
         return error(
             HttpStatus.FORBIDDEN,
             "ACCOUNT_BLOCKED",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(AccountSuspendedException.class)
+    public ResponseEntity<ApiErrorResponse> suspended(
+        AccountSuspendedException exception,
+        HttpServletRequest request
+    ) {
+        return error(
+            HttpStatus.FORBIDDEN,
+            "ACCOUNT_SUSPENDED",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(LoginRateLimitedException.class)
+    public ResponseEntity<ApiErrorResponse> rateLimited(
+        LoginRateLimitedException exception,
+        HttpServletRequest request
+    ) {
+        return error(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "RATE_LIMITED",
             exception.getMessage(),
             request,
             Map.of()

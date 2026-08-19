@@ -20,10 +20,15 @@ server:
 sup2i:
   security:
     local-provider-code: local
-    
+
     jwt:
       issuer: sup2i-food-backend
       access-token-ttl: 15m
       secret-base64: ${SUP2I_JWT_SECRET_BASE64}
 
     refresh-token-ttl: 30d
+
+    login-protection:
+      enabled: true
+      max-failed-attempts: 5
+      failure-window: 15m

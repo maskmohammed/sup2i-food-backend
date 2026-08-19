@@ -8,13 +8,21 @@ import java.time.Duration;
 public record SecurityProperties(
     String localProviderCode,
     Jwt jwt,
-    Duration refreshTokenTtl
+    Duration refreshTokenTtl,
+    LoginProtection loginProtection
 ) {
 
     public record Jwt(
         String issuer,
         Duration accessTokenTtl,
         String secretBase64
+    ) {
+    }
+
+    public record LoginProtection(
+        boolean enabled,
+        int maxFailedAttempts,
+        Duration failureWindow
     ) {
     }
 }

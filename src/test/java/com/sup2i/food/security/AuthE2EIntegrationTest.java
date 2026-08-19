@@ -40,7 +40,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         // "0123456789abcdef0123456789abcdef" encodé Base64.
         "sup2i.security.jwt.secret-base64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 
-        "sup2i.security.refresh-token-ttl=30d"
+        "sup2i.security.refresh-token-ttl=30d",
+        "sup2i.security.login-protection.enabled=true",
+        "sup2i.security.login-protection.max-failed-attempts=3",
+        "sup2i.security.login-protection.failure-window=15m"
     }
 )
 @ActiveProfiles("test")
@@ -509,6 +512,226 @@ class AuthE2EIntegrationTest {
         assertThat(revoked)
             .isEqualTo(1);
     }
+
+    @Test
+void blockedAccountReturnsAccountBlocked()
+    throws Exception {
+
+    jdbcTemplate.update(
+        """
+        UPDATE users
+        SET status = 'BLOCKED'
+        WHERE email = ?
+        """,
+        EMAIL
+    );
+
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isForbidden()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("ACCOUNT_BLOCKED")
+        );
+
+    Long auditCount =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM auth_login_events ale
+            JOIN users u
+              ON u.id = ale.user_id
+            WHERE u.email = ?
+              AND ale.result = 'BLOCKED'
+              AND ale.failure_reason =
+                  'ACCOUNT_BLOCKED'
+            """,
+            Long.class,
+            EMAIL
+        );
+
+    assertThat(auditCount)
+        .isEqualTo(1L);
+}
+
+@Test
+void suspendedAccountReturnsAccountSuspended()
+    throws Exception {
+
+    jdbcTemplate.update(
+        """
+        UPDATE users
+        SET status = 'SUSPENDED'
+        WHERE email = ?
+        """,
+        EMAIL
+    );
+
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isForbidden()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("ACCOUNT_SUSPENDED")
+        );
+
+    Long auditCount =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM auth_login_events ale
+            JOIN users u
+              ON u.id = ale.user_id
+            WHERE u.email = ?
+              AND ale.result = 'BLOCKED'
+              AND ale.failure_reason =
+                  'ACCOUNT_SUSPENDED'
+            """,
+            Long.class,
+            EMAIL
+        );
+
+    assertThat(auditCount)
+        .isEqualTo(1L);
+}
+
+@Test
+void tooManyFailedLoginsAreRateLimited()
+    throws Exception {
+
+    String wrongPassword =
+        "WrongPassword!2026";
+
+    /*
+     * Seuil TEST = 3.
+     */
+    for (int attempt = 0;
+         attempt < 3;
+         attempt++) {
+
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                wrongPassword
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            );
+    }
+
+    /*
+     * 4e tentative pendant la fenêtre :
+     * le password n'est même plus évalué.
+     */
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            wrongPassword
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isTooManyRequests()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("RATE_LIMITED")
+        );
+
+    Long failed =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM auth_login_events ale
+            JOIN users u
+              ON u.id = ale.user_id
+            WHERE u.email = ?
+              AND ale.result = 'FAILED'
+              AND ale.failure_reason =
+                  'INVALID_CREDENTIALS'
+            """,
+            Long.class,
+            EMAIL
+        );
+
+    assertThat(failed)
+        .isEqualTo(3L);
+
+    Long throttled =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM auth_login_events ale
+            JOIN users u
+              ON u.id = ale.user_id
+            WHERE u.email = ?
+              AND ale.result = 'BLOCKED'
+              AND ale.failure_reason =
+                  'LOGIN_RATE_LIMITED'
+            """,
+            Long.class,
+            EMAIL
+        );
+
+    assertThat(throttled)
+        .isEqualTo(1L);
+}
 
     @Test
     void invalidPasswordIsAudited()

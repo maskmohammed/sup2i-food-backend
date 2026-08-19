@@ -1,17 +1,16 @@
 package com.sup2i.food.security.service;
 
 import com.sup2i.food.identity.domain.AuthIdentity;
-import com.sup2i.food.identity.domain.AuthLoginEvent;
-import com.sup2i.food.identity.domain.AuthLoginResult;
 import com.sup2i.food.identity.domain.AuthProviderType;
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.domain.UserStatus;
 import com.sup2i.food.identity.repository.AuthIdentityRepository;
-import com.sup2i.food.identity.repository.AuthLoginEventRepository;
 import com.sup2i.food.identity.repository.UserRepository;
 import com.sup2i.food.security.config.SecurityProperties;
+import com.sup2i.food.security.exception.AccountBlockedException;
+import com.sup2i.food.security.exception.AccountSuspendedException;
+import com.sup2i.food.security.exception.LoginRateLimitedException;
 import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,39 +22,45 @@ import java.time.OffsetDateTime;
 public class LocalAuthenticationService {
 
     private final AuthIdentityRepository identityRepository;
-    private final AuthLoginEventRepository loginEventRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
-    private final TokenHashService tokenHashService;
+    private final AuthLoginAuditService auditService;
+    private final LoginRateLimitService rateLimitService;
     private final SecurityProperties properties;
 
     public LocalAuthenticationService(
         AuthIdentityRepository identityRepository,
-        AuthLoginEventRepository loginEventRepository,
         UserRepository userRepository,
         PasswordEncoder passwordEncoder,
         RefreshTokenService refreshTokenService,
-        TokenHashService tokenHashService,
+        AuthLoginAuditService auditService,
+        LoginRateLimitService rateLimitService,
         SecurityProperties properties
     ) {
-        this.identityRepository = identityRepository;
-        this.loginEventRepository =
-            loginEventRepository;
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
+        this.identityRepository =
+            identityRepository;
+
+        this.userRepository =
+            userRepository;
+
+        this.passwordEncoder =
+            passwordEncoder;
+
         this.refreshTokenService =
             refreshTokenService;
-        this.tokenHashService = tokenHashService;
-        this.properties = properties;
+
+        this.auditService =
+            auditService;
+
+        this.rateLimitService =
+            rateLimitService;
+
+        this.properties =
+            properties;
     }
 
-    @Transactional(
-        noRollbackFor = {
-            BadCredentialsException.class,
-            DisabledException.class
-        }
-    )
+    @Transactional
     public AuthenticationTokens login(
         String loginIdentifier,
         String password,
@@ -73,35 +78,52 @@ public class LocalAuthenticationService {
                     properties.localProviderCode(),
                     identifier
                 )
-                .orElseThrow(() -> {
-                    recordFailure(
-                        null,
-                        identifier,
-                        "INVALID_CREDENTIALS",
-                        ipAddress,
-                        userAgent
-                    );
+                .orElse(null);
 
-                    return new BadCredentialsException(
-                        "Invalid credentials."
-                    );
-                });
+        /*
+         * Identifiant inconnu.
+         *
+         * Même réponse "Invalid credentials" afin de ne pas
+         * confirmer directement l'existence du compte.
+         */
+        if (identity == null) {
 
-        User user = identity.getUser();
-
-        if (user.getStatus() != UserStatus.ACTIVE) {
-
-            recordBlocked(
-                user,
+            enforceRateLimit(
+                null,
                 identifier,
                 ipAddress,
                 userAgent
             );
 
-            throw new DisabledException(
-                "User account is not active."
+            auditService.recordFailure(
+                null,
+                identifier,
+                "INVALID_CREDENTIALS",
+                ipAddress,
+                userAgent
+            );
+
+            throw new BadCredentialsException(
+                "Invalid credentials."
             );
         }
+
+        User user =
+            identity.getUser();
+
+        enforceAccountStatus(
+            user,
+            identifier,
+            ipAddress,
+            userAgent
+        );
+
+        enforceRateLimit(
+            user,
+            identifier,
+            ipAddress,
+            userAgent
+        );
 
         String passwordHash =
             identity.getPasswordHash();
@@ -113,8 +135,9 @@ public class LocalAuthenticationService {
                 passwordHash
             )
         ) {
-            recordFailure(
-                user,
+
+            auditService.recordFailure(
+                user.getId(),
                 identifier,
                 "INVALID_CREDENTIALS",
                 ipAddress,
@@ -135,105 +158,97 @@ public class LocalAuthenticationService {
         identityRepository.save(identity);
         userRepository.save(user);
 
-        recordSuccess(
-            user,
-            identifier,
-            ipAddress,
-            userAgent
-        );
-
-        return refreshTokenService.issue(
-            user,
-            deviceInfo,
-            ipAddress
-        );
-    }
-
-    private void recordSuccess(
-        User user,
-        String identifier,
-        InetAddress ipAddress,
-        String userAgent
-    ) {
-        AuthLoginEvent event =
-            new AuthLoginEvent(
-                AuthLoginResult.SUCCESS
+        AuthenticationTokens tokens =
+            refreshTokenService.issue(
+                user,
+                deviceInfo,
+                ipAddress
             );
 
-        populateEvent(
-            event,
-            user,
+        auditService.recordSuccess(
+            user.getId(),
             identifier,
             ipAddress,
             userAgent
         );
 
-        loginEventRepository.save(event);
+        return tokens;
     }
 
-    private void recordFailure(
+    private void enforceAccountStatus(
         User user,
         String identifier,
-        String reason,
         InetAddress ipAddress,
         String userAgent
     ) {
-        AuthLoginEvent event =
-            new AuthLoginEvent(
-                AuthLoginResult.FAILED
+        UserStatus status =
+            user.getStatus();
+
+        if (status == UserStatus.ACTIVE) {
+            return;
+        }
+
+        if (status == UserStatus.SUSPENDED) {
+
+            auditService.recordBlocked(
+                user.getId(),
+                identifier,
+                "ACCOUNT_SUSPENDED",
+                ipAddress,
+                userAgent
             );
 
-        populateEvent(
-            event,
-            user,
-            identifier,
-            ipAddress,
-            userAgent
-        );
-
-        event.setFailureReason(reason);
-
-        loginEventRepository.save(event);
-    }
-
-    private void recordBlocked(
-        User user,
-        String identifier,
-        InetAddress ipAddress,
-        String userAgent
-    ) {
-        AuthLoginEvent event =
-            new AuthLoginEvent(
-                AuthLoginResult.BLOCKED
+            throw new AccountSuspendedException(
+                "User account is suspended."
             );
+        }
 
-        populateEvent(
-            event,
-            user,
+        /*
+         * BLOCKED et ARCHIVED sont volontairement refusés.
+         * On ne crée pas un nouveau code API ARCHIVED ici
+         * puisque ce code n'est pas défini dans le contrat
+         * que nous avons validé.
+         */
+        auditService.recordBlocked(
+            user.getId(),
             identifier,
+            "ACCOUNT_BLOCKED",
             ipAddress,
             userAgent
         );
 
-        event.setFailureReason(
-            "ACCOUNT_NOT_ACTIVE"
+        throw new AccountBlockedException(
+            "User account is blocked."
         );
-
-        loginEventRepository.save(event);
     }
 
-    private void populateEvent(
-        AuthLoginEvent event,
+    private void enforceRateLimit(
         User user,
         String identifier,
         InetAddress ipAddress,
         String userAgent
     ) {
-        event.setUser(user);
-        event.setIdentifierHash(
-            tokenHashService.hash(identifier)
+        if (
+            !rateLimitService.isRateLimited(
+                identifier,
+                ipAddress
+            )
+        ) {
+            return;
+        }
+
+        auditService.recordBlocked(
+            user == null
+                ? null
+                : user.getId(),
+            identifier,
+            "LOGIN_RATE_LIMITED",
+            ipAddress,
+            userAgent
         );
-        event.setIpAddress(ipAddress);
-        event.setUserAgent(userAgent);
+
+        throw new LoginRateLimitedException(
+            "Too many failed login attempts. Try again later."
+        );
     }
 }

@@ -1,0 +1,636 @@
+package com.sup2i.food.security;
+
+import com.sup2i.food.security.api.dto.AuthResponse;
+import com.sup2i.food.security.service.TokenHashService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@Testcontainers
+@SpringBootTest(
+    properties = {
+        "sup2i.security.local-provider-code=local",
+        "sup2i.security.jwt.issuer=sup2i-food-backend-test",
+        "sup2i.security.jwt.access-token-ttl=15m",
+
+        // TEST ONLY:
+        // "0123456789abcdef0123456789abcdef" encodé Base64.
+        "sup2i.security.jwt.secret-base64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+
+        "sup2i.security.refresh-token-ttl=30d"
+    }
+)
+@ActiveProfiles("test")
+@AutoConfigureMockMvc
+class AuthE2EIntegrationTest {
+
+    private static final String EMAIL =
+        "e2e.student@sup2i.test";
+
+    private static final String PASSWORD =
+        "Sup2iE2E!2026";
+
+    @Container
+    @ServiceConnection
+    static final PostgreSQLContainer POSTGRES =
+        new PostgreSQLContainer(
+            "postgres:17.10-bookworm"
+        )
+            .withDatabaseName("sup2i_food_test")
+            .withUsername("sup2i_food_test")
+            .withPassword("sup2i_food_test");
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private TokenHashService tokenHashService;
+
+    @Autowired
+    private JsonMapper jsonMapper;
+
+    @BeforeEach
+    void seedDatabase() {
+
+        /*
+         * DB totalement isolée par Testcontainers.
+         * On peut donc nettoyer le jeu E2E avant chaque test.
+         */
+        jdbcTemplate.execute(
+            "TRUNCATE TABLE organizations, roles CASCADE"
+        );
+
+        UUID organizationId =
+            jdbcTemplate.queryForObject(
+                """
+                INSERT INTO organizations (
+                    name,
+                    code,
+                    is_active
+                )
+                VALUES (
+                    'SUP2I Test',
+                    'SUP2I-TEST',
+                    true
+                )
+                RETURNING id
+                """,
+                UUID.class
+            );
+
+        UUID campusId =
+            jdbcTemplate.queryForObject(
+                """
+                INSERT INTO campuses (
+                    organization_id,
+                    name,
+                    code,
+                    timezone,
+                    is_active
+                )
+                VALUES (
+                    ?,
+                    'Campus Test',
+                    'TEST-CAMPUS',
+                    'Africa/Casablanca',
+                    true
+                )
+                RETURNING id
+                """,
+                UUID.class,
+                organizationId
+            );
+
+        UUID roleId =
+            jdbcTemplate.queryForObject(
+                """
+                INSERT INTO roles (
+                    code,
+                    name,
+                    description,
+                    is_system
+                )
+                VALUES (
+                    'STUDENT',
+                    'Student',
+                    'Student integration test role',
+                    true
+                )
+                RETURNING id
+                """,
+                UUID.class
+            );
+
+        UUID userId =
+            jdbcTemplate.queryForObject(
+                """
+                INSERT INTO users (
+                    organization_id,
+                    email,
+                    first_name,
+                    last_name,
+                    status
+                )
+                VALUES (
+                    ?,
+                    ?,
+                    'E2E',
+                    'Student',
+                    'ACTIVE'
+                )
+                RETURNING id
+                """,
+                UUID.class,
+                organizationId,
+                EMAIL
+            );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO students (
+                user_id,
+                campus_id,
+                student_number,
+                program,
+                level,
+                group_name,
+                enrollment_status
+            )
+            VALUES (
+                ?,
+                ?,
+                'E2E-0001',
+                'E2E',
+                'TEST',
+                'E2E',
+                'ACTIVE'
+            )
+            """,
+            userId,
+            campusId
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO auth_identities (
+                user_id,
+                provider_type,
+                provider_code,
+                login_identifier,
+                password_hash,
+                is_verified,
+                is_primary,
+                is_active
+            )
+            VALUES (
+                ?,
+                'LOCAL',
+                'local',
+                ?,
+                ?,
+                true,
+                true,
+                true
+            )
+            """,
+            userId,
+            EMAIL,
+            passwordEncoder.encode(PASSWORD)
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_roles (
+                user_id,
+                role_id,
+                campus_id,
+                location_id,
+                assigned_by
+            )
+            VALUES (
+                ?,
+                ?,
+                NULL,
+                NULL,
+                NULL
+            )
+            """,
+            userId,
+            roleId
+        );
+    }
+
+    @Test
+    void loginAndMeWork() throws Exception {
+
+        AuthResponse auth =
+            login(PASSWORD);
+
+        assertThat(auth.accessToken())
+            .isNotBlank();
+
+        assertThat(auth.refreshToken())
+            .isNotBlank();
+
+        assertThat(auth.expiresIn())
+            .isPositive();
+
+        assertThat(auth.user().email())
+            .isEqualTo(EMAIL);
+
+        assertThat(auth.user().roles())
+            .contains("STUDENT");
+
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(auth.accessToken())
+                    )
+            )
+            .andExpect(status().isOk())
+            .andExpect(
+                jsonPath("$.email")
+                    .value(EMAIL)
+            )
+            .andExpect(
+                jsonPath("$.status")
+                    .value("ACTIVE")
+            )
+            .andExpect(
+                jsonPath("$.student.studentNumber")
+                    .value("E2E-0001")
+            );
+    }
+
+    @Test
+    void refreshRotatesToken() throws Exception {
+
+        AuthResponse first =
+            login(PASSWORD);
+
+        AuthResponse second =
+            refresh(
+                first.refreshToken()
+            );
+
+        assertThat(second.accessToken())
+            .isNotEqualTo(first.accessToken());
+
+        assertThat(second.refreshToken())
+            .isNotEqualTo(first.refreshToken());
+
+        String oldHash =
+            tokenHashService.hash(
+                first.refreshToken()
+            );
+
+        Map<String, Object> oldToken =
+            jdbcTemplate.queryForMap(
+                """
+                SELECT
+                    revoked_at,
+                    replaced_by_id
+                FROM refresh_tokens
+                WHERE token_hash = ?
+                """,
+                oldHash
+            );
+
+        assertThat(
+            oldToken.get("revoked_at")
+        ).isNotNull();
+
+        assertThat(
+            oldToken.get("replaced_by_id")
+        ).isNotNull();
+    }
+
+    @Test
+    void refreshReuseRevokesReplacement()
+        throws Exception {
+
+        AuthResponse first =
+            login(PASSWORD);
+
+        AuthResponse second =
+            refresh(
+                first.refreshToken()
+            );
+
+        mockMvc.perform(
+                post("/api/v1/auth/refresh")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "refreshToken",
+                                first.refreshToken()
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            );
+
+        /*
+         * Le token de remplacement doit maintenant
+         * lui aussi être inutilisable.
+         */
+        mockMvc.perform(
+                post("/api/v1/auth/refresh")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "refreshToken",
+                                second.refreshToken()
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            );
+
+        Long activeSessions =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM refresh_tokens rt
+                JOIN users u
+                  ON u.id = rt.user_id
+                WHERE u.email = ?
+                  AND rt.revoked_at IS NULL
+                """,
+                Long.class,
+                EMAIL
+            );
+
+        assertThat(activeSessions)
+            .isZero();
+    }
+
+    @Test
+    void logoutImmediatelyInvalidatesAccessAndRefresh()
+        throws Exception {
+
+        AuthResponse auth =
+            login(PASSWORD);
+
+        /*
+         * JWT valide avant logout.
+         */
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(auth.accessToken())
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            );
+
+        /*
+         * Logout.
+         */
+        mockMvc.perform(
+                post("/api/v1/auth/logout")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(auth.accessToken())
+                    )
+            )
+            .andExpect(
+                status().isNoContent()
+            );
+
+        /*
+         * Le JWT déjà signé doit être rejeté
+         * immédiatement grâce au sid.
+         */
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(auth.accessToken())
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            );
+
+        /*
+         * Le refresh de la même session
+         * doit également être rejeté.
+         */
+        mockMvc.perform(
+                post("/api/v1/auth/refresh")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "refreshToken",
+                                auth.refreshToken()
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            );
+
+        String hash =
+            tokenHashService.hash(
+                auth.refreshToken()
+            );
+
+        Integer revoked =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT
+                    CASE
+                        WHEN revoked_at IS NULL
+                        THEN 0
+                        ELSE 1
+                    END
+                FROM refresh_tokens
+                WHERE token_hash = ?
+                """,
+                Integer.class,
+                hash
+            );
+
+        assertThat(revoked)
+            .isEqualTo(1);
+    }
+
+    @Test
+    void invalidPasswordIsAudited()
+        throws Exception {
+
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                "WrongPassword!2026"
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            );
+
+        Long failures =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM auth_login_events ale
+                JOIN users u
+                  ON u.id = ale.user_id
+                WHERE u.email = ?
+                  AND ale.result = 'FAILED'
+                """,
+                Long.class,
+                EMAIL
+            );
+
+        assertThat(failures)
+            .isEqualTo(1L);
+    }
+
+    private AuthResponse login(
+        String password
+    ) throws Exception {
+
+        MvcResult result =
+            mockMvc.perform(
+                    post("/api/v1/auth/login")
+                        .contentType(
+                            MediaType.APPLICATION_JSON
+                        )
+                        .content(
+                            json(
+                                Map.of(
+                                    "email",
+                                    EMAIL,
+                                    "password",
+                                    password
+                                )
+                            )
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andReturn();
+
+        return jsonMapper.readValue(
+            result.getResponse()
+                .getContentAsString(),
+            AuthResponse.class
+        );
+    }
+
+    private AuthResponse refresh(
+        String refreshToken
+    ) throws Exception {
+
+        MvcResult result =
+            mockMvc.perform(
+                    post("/api/v1/auth/refresh")
+                        .contentType(
+                            MediaType.APPLICATION_JSON
+                        )
+                        .content(
+                            json(
+                                Map.of(
+                                    "refreshToken",
+                                    refreshToken
+                                )
+                            )
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andReturn();
+
+        return jsonMapper.readValue(
+            result.getResponse()
+                .getContentAsString(),
+            AuthResponse.class
+        );
+    }
+
+    private String json(
+        Object value
+    ) throws Exception {
+
+        return jsonMapper
+            .writeValueAsString(value);
+    }
+
+    private String bearer(
+        String accessToken
+    ) {
+        return "Bearer " + accessToken;
+    }
+}

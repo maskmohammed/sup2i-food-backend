@@ -1,7 +1,11 @@
 package com.sup2i.food.security;
 
 import com.sup2i.food.security.api.dto.AuthResponse;
+import com.sup2i.food.security.api.dto.MfaTotpSetupResponse;
+import com.sup2i.food.security.service.Base32Codec;
 import com.sup2i.food.security.service.TokenHashService;
+import com.sup2i.food.security.service.TotpService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +23,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
+import com.sup2i.food.security.api.dto.MfaTotpConfirmResponse;
+import com.sup2i.food.security.api.dto.MfaTotpSetupResponse;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -43,7 +50,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "sup2i.security.refresh-token-ttl=30d",
         "sup2i.security.login-protection.enabled=true",
         "sup2i.security.login-protection.max-failed-attempts=3",
-        "sup2i.security.login-protection.failure-window=15m"
+        "sup2i.security.login-protection.failure-window=15m",
+        "sup2i.security.mfa.enabled=true",
+        "sup2i.security.mfa.required-roles=ADMINISTRATION,SYSTEM_ADMIN",
+        "sup2i.security.mfa.encryption-key-base64=YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk=",
+        "sup2i.security.mfa.recovery-code-count=10"
     }
 )
 @ActiveProfiles("test")
@@ -68,6 +79,9 @@ class AuthE2EIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private TotpService totpService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -410,6 +424,186 @@ class AuthE2EIntegrationTest {
 
         assertThat(activeSessions)
             .isZero();
+    }
+
+    @Test
+    void recoveryCodeCanBeUsedOnlyOnce()
+        throws Exception {
+
+        grantRole("SYSTEM_ADMIN");
+
+        /*
+        * 1. Démarrage enrollment TOTP.
+        */
+        MfaTotpSetupResponse setup =
+            setupTotp();
+
+        byte[] secret =
+            Base32Codec.decode(
+                setup.secret()
+            );
+
+        String confirmationCode =
+            totpService.currentCode(
+                secret
+            );
+
+        /*
+        * 2. Activation MFA + récupération
+        *    des recovery codes.
+        */
+        MvcResult confirmationResult =
+            mockMvc.perform(
+                    post(
+                        "/api/v1/auth/mfa/totp/confirm"
+                    )
+                        .contentType(
+                            MediaType.APPLICATION_JSON
+                        )
+                        .content(
+                            json(
+                                Map.of(
+                                    "email",
+                                    EMAIL,
+                                    "password",
+                                    PASSWORD,
+                                    "methodId",
+                                    setup
+                                        .methodId()
+                                        .toString(),
+                                    "code",
+                                    confirmationCode
+                                )
+                            )
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andReturn();
+
+        MfaTotpConfirmResponse confirmation =
+            jsonMapper.readValue(
+                confirmationResult
+                    .getResponse()
+                    .getContentAsString(),
+                MfaTotpConfirmResponse.class
+            );
+
+        assertThat(
+            confirmation.recoveryCodes()
+        )
+            .hasSize(10);
+
+        String recoveryCode =
+            confirmation
+                .recoveryCodes()
+                .getFirst();
+
+        assertThat(recoveryCode)
+            .isNotBlank();
+
+        /*
+        * 3. Première utilisation :
+        *    doit authentifier.
+        */
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                PASSWORD,
+                                "recoveryCode",
+                                recoveryCode
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.accessToken")
+                    .isNotEmpty()
+            )
+            .andExpect(
+                jsonPath("$.refreshToken")
+                    .isNotEmpty()
+            );
+
+        /*
+        * 4. La DB doit maintenant marquer
+        *    exactement un recovery code utilisé.
+        */
+        Long usedAfterFirstAttempt =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM user_mfa_recovery_codes
+                WHERE used_at IS NOT NULL
+                """,
+                Long.class
+            );
+
+        assertThat(
+            usedAfterFirstAttempt
+        )
+            .isEqualTo(1L);
+
+        /*
+        * 5. Deuxième utilisation du même code :
+        *    interdite.
+        */
+        mockMvc.perform(
+                post("/api/v1/auth/login")
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                PASSWORD,
+                                "recoveryCode",
+                                recoveryCode
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            );
+
+        /*
+        * 6. Toujours exactement un code consommé.
+        *    Aucun second usage n'a été accepté.
+        */
+        Long usedAfterReplay =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM user_mfa_recovery_codes
+                WHERE used_at IS NOT NULL
+                """,
+                Long.class
+            );
+
+        assertThat(
+            usedAfterReplay
+        )
+            .isEqualTo(1L);
     }
 
     @Test
@@ -856,4 +1050,352 @@ void tooManyFailedLoginsAreRateLimited()
     ) {
         return "Bearer " + accessToken;
     }
+
+    private void grantRole(
+        String roleCode
+    ) {
+        UUID userId =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM users
+                WHERE email = ?
+                """,
+                UUID.class,
+                EMAIL
+            );
+
+        UUID roleId =
+            jdbcTemplate.queryForObject(
+                """
+                INSERT INTO roles (
+                    code,
+                    name,
+                    description,
+                    is_system
+                )
+                VALUES (
+                    ?,
+                    ?,
+                    'MFA E2E role',
+                    true
+                )
+                ON CONFLICT (code)
+                DO UPDATE
+                SET name = EXCLUDED.name
+                RETURNING id
+                """,
+                UUID.class,
+                roleCode,
+                roleCode
+            );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_roles (
+                user_id,
+                role_id,
+                campus_id,
+                location_id,
+                assigned_by
+            )
+            VALUES (
+                ?,
+                ?,
+                NULL,
+                NULL,
+                NULL
+            )
+            ON CONFLICT DO NOTHING
+            """,
+            userId,
+            roleId
+        );
+    }
+
+    private MfaTotpSetupResponse setupTotp()
+    throws Exception {
+
+    MvcResult result =
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/mfa/totp/setup"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                PASSWORD,
+                                "label",
+                                "E2E Authenticator"
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andReturn();
+
+    return jsonMapper.readValue(
+        result.getResponse()
+            .getContentAsString(),
+        MfaTotpSetupResponse.class
+    );
+}
+
+@Test
+void sensitiveAccountRequiresMfaSetup()
+    throws Exception {
+
+    grantRole("ADMINISTRATION");
+
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isForbidden()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value(
+                    "MFA_SETUP_REQUIRED"
+                )
+        );
+
+    Long sessions =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM refresh_tokens
+            """,
+            Long.class
+        );
+
+    assertThat(sessions)
+        .isZero();
+}
+
+@Test
+void totpSetupActivatesMfaAndReturnsRecoveryCodes()
+    throws Exception {
+
+    grantRole("SYSTEM_ADMIN");
+
+    MfaTotpSetupResponse setup =
+        setupTotp();
+
+    assertThat(setup.secret())
+        .isNotBlank();
+
+    assertThat(setup.otpauthUri())
+        .startsWith(
+            "otpauth://totp/"
+        );
+
+    byte[] secret =
+        Base32Codec.decode(
+            setup.secret()
+        );
+
+    String code =
+        totpService.currentCode(
+            secret
+        );
+
+    MvcResult confirmation =
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/mfa/totp/confirm"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                PASSWORD,
+                                "methodId",
+                                setup
+                                    .methodId()
+                                    .toString(),
+                                "code",
+                                code
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath(
+                    "$.auth.accessToken"
+                ).isNotEmpty()
+            )
+            .andExpect(
+                jsonPath(
+                    "$.recoveryCodes.length()"
+                ).value(10)
+            )
+            .andReturn();
+
+    String response =
+        confirmation
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(response)
+        .doesNotContain(
+            setup.secret()
+        );
+
+    byte[] stored =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT secret_ciphertext
+            FROM user_mfa_methods
+            WHERE id = ?
+            """,
+            byte[].class,
+            setup.methodId()
+        );
+
+    assertThat(stored)
+        .isNotEqualTo(secret);
+}
+
+@Test
+void configuredSensitiveAccountRequiresSecondFactor()
+    throws Exception {
+
+    grantRole("ADMINISTRATION");
+
+    MfaTotpSetupResponse setup =
+        setupTotp();
+
+    byte[] secret =
+        Base32Codec.decode(
+            setup.secret()
+        );
+
+    String confirmationCode =
+        totpService.currentCode(
+            secret
+        );
+
+    mockMvc.perform(
+            post(
+                "/api/v1/auth/mfa/totp/confirm"
+            )
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "methodId",
+                            setup.methodId()
+                                .toString(),
+                            "code",
+                            confirmationCode
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isOk()
+        );
+
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isUnauthorized()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("MFA_REQUIRED")
+        );
+
+    /*
+     * +1 fenêtre TOTP :
+     * notre vérificateur RFC6238 accepte
+     * une petite tolérance d'horloge et
+     * empêche la réutilisation du code
+     * utilisé pour l'enrollment.
+     */
+    String nextCode =
+        totpService.codeFor(
+            secret,
+            Instant.now()
+                .plusSeconds(30)
+        );
+
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "mfaCode",
+                            nextCode
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isOk()
+        )
+        .andExpect(
+            jsonPath("$.accessToken")
+                .isNotEmpty()
+        );
+}
+
+
 }

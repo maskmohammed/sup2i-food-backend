@@ -32,3 +32,10 @@ sup2i:
       enabled: true
       max-failed-attempts: 5
       failure-window: 15m
+    mfa:
+      enabled: true
+      required-roles:
+        - ADMINISTRATION
+        - SYSTEM_ADMIN
+      encryption-key-base64: ${SUP2I_MFA_ENCRYPTION_KEY_BASE64}
+      recovery-code-count: 10

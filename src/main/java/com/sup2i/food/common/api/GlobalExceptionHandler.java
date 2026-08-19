@@ -11,6 +11,9 @@ import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.sup2i.food.security.exception.MfaAlreadyConfiguredException;
+import com.sup2i.food.security.exception.MfaRequiredException;
+import com.sup2i.food.security.exception.MfaSetupRequiredException;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -126,5 +129,56 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(status)
             .body(body);
+    }
+
+    @ExceptionHandler(MfaRequiredException.class)
+    public ResponseEntity<ApiErrorResponse> mfaRequired(
+        MfaRequiredException exception,
+        HttpServletRequest request
+    ) {
+        return error(
+            HttpStatus.UNAUTHORIZED,
+            "MFA_REQUIRED",
+            exception.getMessage(),
+            request,
+            Map.of(
+                "methods",
+                java.util.List.of(
+                    "TOTP",
+                    "RECOVERY_CODE"
+                )
+            )
+        );
+    }
+
+    @ExceptionHandler(MfaSetupRequiredException.class)
+    public ResponseEntity<ApiErrorResponse> mfaSetupRequired(
+        MfaSetupRequiredException exception,
+        HttpServletRequest request
+    ) {
+        return error(
+            HttpStatus.FORBIDDEN,
+            "MFA_SETUP_REQUIRED",
+            exception.getMessage(),
+            request,
+            Map.of(
+                "setupMethod",
+                "TOTP"
+            )
+        );
+    }
+
+    @ExceptionHandler(MfaAlreadyConfiguredException.class)
+    public ResponseEntity<ApiErrorResponse> mfaAlreadyConfigured(
+        MfaAlreadyConfiguredException exception,
+        HttpServletRequest request
+    ) {
+        return error(
+            HttpStatus.CONFLICT,
+            "MFA_ALREADY_CONFIGURED",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
     }
 }

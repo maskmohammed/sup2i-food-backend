@@ -2,10 +2,15 @@ package com.sup2i.food.security.api;
 
 import com.sup2i.food.security.api.dto.AuthResponse;
 import com.sup2i.food.security.api.dto.LoginRequest;
+import com.sup2i.food.security.api.dto.MfaTotpConfirmRequest;
+import com.sup2i.food.security.api.dto.MfaTotpConfirmResponse;
+import com.sup2i.food.security.api.dto.MfaTotpSetupRequest;
+import com.sup2i.food.security.api.dto.MfaTotpSetupResponse;
 import com.sup2i.food.security.api.dto.RefreshRequest;
 import com.sup2i.food.security.service.AuthResponseService;
 import com.sup2i.food.security.service.AuthenticationTokens;
 import com.sup2i.food.security.service.LocalAuthenticationService;
+import com.sup2i.food.security.service.MfaEnrollmentService;
 import com.sup2i.food.security.service.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -30,15 +35,18 @@ public class AuthController {
     private final LocalAuthenticationService authenticationService;
     private final RefreshTokenService refreshTokenService;
     private final AuthResponseService responseService;
+    private final MfaEnrollmentService mfaEnrollmentService;
 
     public AuthController(
         LocalAuthenticationService authenticationService,
         RefreshTokenService refreshTokenService,
-        AuthResponseService responseService
+        AuthResponseService responseService,
+        MfaEnrollmentService mfaEnrollmentService
     ) {
         this.authenticationService = authenticationService;
         this.refreshTokenService = refreshTokenService;
         this.responseService = responseService;
+        this.mfaEnrollmentService = mfaEnrollmentService;
     }
 
     @PostMapping("/login")
@@ -58,6 +66,8 @@ public class AuthController {
             authenticationService.login(
                 email,
                 request.password(),
+                request.mfaCode(),
+                request.recoveryCode(),
                 compact(userAgent),
                 resolveIp(httpRequest),
                 userAgent
@@ -134,4 +144,102 @@ public class AuthController {
             ? value
             : value.substring(0, 255);
     }
+
+    @PostMapping("/mfa/totp/setup")
+    public ResponseEntity<MfaTotpSetupResponse>
+        setupTotp(
+            @Valid
+            @RequestBody
+            MfaTotpSetupRequest request,
+            HttpServletRequest httpRequest,
+            @RequestHeader(
+                value = "User-Agent",
+                required = false
+            )
+            String userAgent
+        ) {
+
+        String email =
+            request.email()
+                .trim()
+                .toLowerCase(
+                    Locale.ROOT
+                );
+
+        MfaEnrollmentService.SetupResult result =
+            mfaEnrollmentService.start(
+                email,
+                request.password(),
+                request.label(),
+                resolveIp(httpRequest),
+                userAgent
+            );
+
+        return ResponseEntity
+            .ok()
+            .header(
+                "Cache-Control",
+                "no-store"
+            )
+            .body(
+                new MfaTotpSetupResponse(
+                    result.methodId(),
+                    result.secret(),
+                    result.otpauthUri()
+                )
+            );
+    }
+
+    @PostMapping("/mfa/totp/confirm")
+    public ResponseEntity<MfaTotpConfirmResponse>
+        confirmTotp(
+            @Valid
+            @RequestBody
+            MfaTotpConfirmRequest request,
+            HttpServletRequest httpRequest,
+            @RequestHeader(
+                value = "User-Agent",
+                required = false
+            )
+            String userAgent
+        ) {
+
+        String email =
+            request.email()
+                .trim()
+                .toLowerCase(
+                    Locale.ROOT
+                );
+
+        MfaEnrollmentService.ConfirmationResult result =
+            mfaEnrollmentService.confirm(
+                email,
+                request.password(),
+                request.methodId(),
+                request.code(),
+                compact(userAgent),
+                resolveIp(httpRequest),
+                userAgent
+            );
+
+        AuthResponse auth =
+            responseService.create(
+                result.tokens()
+            );
+
+        return ResponseEntity
+            .ok()
+            .header(
+                "Cache-Control",
+                "no-store"
+            )
+            .body(
+                new MfaTotpConfirmResponse(
+                    auth,
+                    result.recoveryCodes()
+                )
+            );
+    }
+
+
 }

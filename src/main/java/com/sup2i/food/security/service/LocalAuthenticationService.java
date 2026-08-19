@@ -50,7 +50,12 @@ public class LocalAuthenticationService {
         this.properties = properties;
     }
 
-    @Transactional
+    @Transactional(
+        noRollbackFor = {
+            BadCredentialsException.class,
+            DisabledException.class
+        }
+    )
     public AuthenticationTokens login(
         String loginIdentifier,
         String password,

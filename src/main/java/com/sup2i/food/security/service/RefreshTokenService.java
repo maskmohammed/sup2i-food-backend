@@ -5,14 +5,15 @@ import com.sup2i.food.security.config.SecurityProperties;
 import com.sup2i.food.security.domain.RefreshToken;
 import com.sup2i.food.security.repository.RefreshTokenRepository;
 import com.sup2i.food.security.service.AuthorizationSnapshotService.AuthorizationSnapshot;
-import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.InetAddress;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class RefreshTokenService {
@@ -32,8 +33,7 @@ public class RefreshTokenService {
     ) {
         this.repository = repository;
         this.tokenHashService = tokenHashService;
-        this.authorizationService =
-            authorizationService;
+        this.authorizationService = authorizationService;
         this.jwtService = jwtService;
         this.properties = properties;
     }
@@ -44,25 +44,22 @@ public class RefreshTokenService {
         String deviceInfo,
         InetAddress ipAddress
     ) {
+        OffsetDateTime now = OffsetDateTime.now();
+
         TokenHashService.GeneratedToken generated =
             tokenHashService.generate();
-
-        OffsetDateTime expiresAt =
-            OffsetDateTime.now().plus(
-                properties.refreshTokenTtl()
-            );
 
         RefreshToken refreshToken =
             new RefreshToken(
                 user,
                 generated.tokenHash(),
-                expiresAt
+                now.plus(properties.refreshTokenTtl())
             );
 
         refreshToken.setDeviceInfo(deviceInfo);
         refreshToken.setIpAddress(ipAddress);
 
-        repository.save(refreshToken);
+        refreshToken = repository.save(refreshToken);
 
         AuthorizationSnapshot authorization =
             authorizationService.load(user.getId());
@@ -70,17 +67,24 @@ public class RefreshTokenService {
         JwtService.AccessToken access =
             jwtService.issueAccessToken(
                 user,
-                authorization
+                authorization,
+                refreshToken.getId()
             );
 
         return new AuthenticationTokens(
+            user.getId(),
             access.token(),
             access.expiresAt(),
             generated.rawToken()
         );
     }
 
-    @Transactional
+    @Transactional(
+        noRollbackFor = {
+            BadCredentialsException.class,
+            CredentialsExpiredException.class
+        }
+    )
     public AuthenticationTokens rotate(
         String rawRefreshToken,
         String deviceInfo,
@@ -100,6 +104,12 @@ public class RefreshTokenService {
                     )
                 );
 
+        /*
+         * Token déjà révoqué + remplacé :
+         * probable réutilisation d'un ancien refresh token.
+         *
+         * On révoque toutes les sessions actives de l'utilisateur.
+         */
         if (current.isRevoked()) {
 
             if (current.getReplacedBy() != null) {
@@ -110,11 +120,12 @@ public class RefreshTokenService {
             }
 
             throw new BadCredentialsException(
-                "Refresh token is revoked."
+                "Refresh token reuse detected."
             );
         }
 
         if (!current.getExpiresAt().isAfter(now)) {
+
             current.revoke(now);
 
             throw new CredentialsExpiredException(
@@ -129,15 +140,13 @@ public class RefreshTokenService {
             new RefreshToken(
                 current.getUser(),
                 generated.tokenHash(),
-                now.plus(
-                    properties.refreshTokenTtl()
-                )
+                now.plus(properties.refreshTokenTtl())
             );
 
         replacement.setDeviceInfo(deviceInfo);
         replacement.setIpAddress(ipAddress);
 
-        repository.save(replacement);
+        replacement = repository.save(replacement);
 
         current.replaceWith(
             replacement,
@@ -152,10 +161,12 @@ public class RefreshTokenService {
         JwtService.AccessToken access =
             jwtService.issueAccessToken(
                 current.getUser(),
-                authorization
+                authorization,
+                replacement.getId()
             );
 
         return new AuthenticationTokens(
+            current.getUser().getId(),
             access.token(),
             access.expiresAt(),
             generated.rawToken()
@@ -171,6 +182,25 @@ public class RefreshTokenService {
 
         repository
             .findByTokenHashForUpdate(hash)
+            .ifPresent(token -> {
+                if (!token.isRevoked()) {
+                    token.revoke(
+                        OffsetDateTime.now()
+                    );
+                }
+            });
+    }
+
+    @Transactional
+    public void revokeSession(
+        UUID sessionId,
+        UUID userId
+    ) {
+        repository
+            .findByIdAndUserIdForUpdate(
+                sessionId,
+                userId
+            )
             .ifPresent(token -> {
                 if (!token.isRevoked()) {
                     token.revoke(

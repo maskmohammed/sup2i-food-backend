@@ -27,7 +27,8 @@ public class JwtService {
 
     public AccessToken issueAccessToken(
         User user,
-        AuthorizationSnapshot authorization
+        AuthorizationSnapshot authorization,
+        UUID sessionId
     ) {
         Instant issuedAt = Instant.now();
 
@@ -41,6 +42,9 @@ public class JwtService {
             .issuedAt(issuedAt)
             .expiresAt(expiresAt)
             .id(UUID.randomUUID().toString())
+
+            // refresh-token/session liée à ce JWT
+            .claim("sid", sessionId.toString())
 
             .claim("email", user.getEmail())
 

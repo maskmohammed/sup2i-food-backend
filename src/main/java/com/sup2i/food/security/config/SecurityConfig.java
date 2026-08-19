@@ -12,6 +12,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -23,7 +25,10 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(
-        HttpSecurity http
+        HttpSecurity http,
+        RestAuthenticationEntryPoint authenticationEntryPoint,
+        RestAccessDeniedHandler accessDeniedHandler,
+        SessionValidationFilter sessionValidationFilter
     ) throws Exception {
 
         http
@@ -35,26 +40,71 @@ public class SecurityConfig {
                 )
             )
 
-            .authorizeHttpRequests(authorize ->
-                authorize
-                    .requestMatchers(
-                        "/auth/login",
-                        "/auth/refresh",
-                        "/auth/logout",
-                        "/actuator/health"
-                    )
-                    .permitAll()
+            // .authorizeHttpRequests(authorize ->
+            //     authorize
+            //         .requestMatchers(
+            //             "/auth/login",
+            //             "/auth/refresh",
+            //             "/auth/logout",
+            //             "/actuator/health"
+            //         )
+            //         .permitAll()
 
-                    .anyRequest()
-                    .authenticated()
+            //         .anyRequest()
+            //         .authenticated()
+            // )
+            .authorizeHttpRequests(authorize ->
+            authorize
+
+                .requestMatchers(
+                    HttpMethod.POST,
+                    "/api/v1/auth/login",
+                    "/api/v1/auth/refresh"
+                )
+                .permitAll()
+
+                .requestMatchers(
+                    "/actuator/health"
+                )
+                .permitAll()
+
+                .anyRequest()
+                .authenticated()
+            )
+
+            .exceptionHandling(exceptions ->
+                exceptions
+
+                    .authenticationEntryPoint(
+                        authenticationEntryPoint
+                    )
+
+                    .accessDeniedHandler(
+                        accessDeniedHandler
+                    )
             )
 
             .oauth2ResourceServer(oauth2 ->
-                oauth2.jwt(jwt ->
-                    jwt.jwtAuthenticationConverter(
-                        jwtAuthenticationConverter()
+                oauth2
+
+                    .authenticationEntryPoint(
+                        authenticationEntryPoint
                     )
-                )
+
+                    .accessDeniedHandler(
+                        accessDeniedHandler
+                    )
+
+                    .jwt(jwt ->
+                        jwt.jwtAuthenticationConverter(
+                            jwtAuthenticationConverter()
+                        )
+                    )
+            )
+
+            .addFilterAfter(
+                sessionValidationFilter,
+                BearerTokenAuthenticationFilter.class
             );
 
         return http.build();

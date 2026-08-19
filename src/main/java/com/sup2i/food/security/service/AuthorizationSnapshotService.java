@@ -4,7 +4,9 @@ import com.sup2i.food.identity.domain.Permission;
 import com.sup2i.food.identity.domain.UserRole;
 import com.sup2i.food.identity.repository.UserRoleRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -22,26 +24,31 @@ public class AuthorizationSnapshotService {
         this.userRoleRepository = userRoleRepository;
     }
 
+    @Transactional(readOnly = true)
     public AuthorizationSnapshot load(UUID userId) {
 
         List<UserRole> assignments =
             userRoleRepository
                 .findAllWithRoleAndPermissionsByUserId(userId);
 
+        Set<String> allRoles = new LinkedHashSet<>();
         Set<String> globalRoles = new LinkedHashSet<>();
         Set<String> globalPermissions = new LinkedHashSet<>();
 
         List<Map<String, Object>> scopes = assignments.stream()
             .map(assignment -> {
 
+                String roleCode =
+                    assignment.getRole().getCode();
+
+                allRoles.add(roleCode);
+
                 boolean global =
                     assignment.getCampus() == null
                         && assignment.getLocation() == null;
 
                 if (global) {
-                    globalRoles.add(
-                        assignment.getRole().getCode()
-                    );
+                    globalRoles.add(roleCode);
 
                     assignment.getRole()
                         .getPermissions()
@@ -50,25 +57,35 @@ public class AuthorizationSnapshotService {
                         .forEach(globalPermissions::add);
                 }
 
-                return Map.<String, Object>of(
-                    "role", assignment.getRole().getCode(),
-                    "campusId",
-                    assignment.getCampus() == null
-                        ? ""
-                        : assignment.getCampus()
-                            .getId()
-                            .toString(),
-                    "locationId",
-                    assignment.getLocation() == null
-                        ? ""
-                        : assignment.getLocation()
+                Map<String, Object> scope =
+                    new LinkedHashMap<>();
+
+                scope.put("role", roleCode);
+
+                if (assignment.getCampus() != null) {
+                    scope.put(
+                        "campusId",
+                        assignment.getCampus()
                             .getId()
                             .toString()
-                );
+                    );
+                }
+
+                if (assignment.getLocation() != null) {
+                    scope.put(
+                        "locationId",
+                        assignment.getLocation()
+                            .getId()
+                            .toString()
+                    );
+                }
+
+                return scope;
             })
             .toList();
 
         return new AuthorizationSnapshot(
+            allRoles,
             globalRoles,
             globalPermissions,
             scopes
@@ -76,6 +93,7 @@ public class AuthorizationSnapshotService {
     }
 
     public record AuthorizationSnapshot(
+        Set<String> allRoles,
         Set<String> globalRoles,
         Set<String> globalPermissions,
         List<Map<String, Object>> roleScopes

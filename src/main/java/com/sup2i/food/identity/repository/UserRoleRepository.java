@@ -15,6 +15,8 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
         from UserRole ur
         join fetch ur.role r
         left join fetch r.permissions
+        left join fetch ur.campus
+        left join fetch ur.location
         where ur.user.id = :userId
         """)
     List<UserRole> findAllWithRoleAndPermissionsByUserId(

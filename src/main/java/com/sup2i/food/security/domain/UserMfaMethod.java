@@ -143,8 +143,22 @@ public class UserMfaMethod {
         this.disabledAt = null;
     }
 
-    public void markUsed(OffsetDateTime lastUsedAt) {
-        this.lastUsedAt = lastUsedAt;
+    public void markUsed(
+        OffsetDateTime lastUsedAt
+    ) {
+        if (lastUsedAt == null) {
+            return;
+        }
+
+        if (
+            this.lastUsedAt == null
+            || lastUsedAt.isAfter(
+                this.lastUsedAt
+            )
+        ) {
+            this.lastUsedAt =
+                lastUsedAt;
+        }
     }
 
     public void disable(OffsetDateTime disabledAt) {

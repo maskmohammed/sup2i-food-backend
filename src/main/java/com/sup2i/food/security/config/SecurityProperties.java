@@ -5,13 +5,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.time.Duration;
 import java.util.Set;
 
-@ConfigurationProperties(prefix = "sup2i.security")
+@ConfigurationProperties(
+    prefix = "sup2i.security"
+)
 public record SecurityProperties(
     String localProviderCode,
     Jwt jwt,
     Duration refreshTokenTtl,
     LoginProtection loginProtection,
-    Mfa mfa
+    Mfa mfa,
+    Cors cors
 ) {
 
     public record Jwt(
@@ -33,6 +36,13 @@ public record SecurityProperties(
         Set<String> requiredRoles,
         String encryptionKeyBase64,
         int recoveryCodeCount
+    ) {
+    }
+
+    public record Cors(
+        boolean enabled,
+        Set<String> allowedOrigins,
+        Duration maxAge
     ) {
     }
 }

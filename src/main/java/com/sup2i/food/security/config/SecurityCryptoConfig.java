@@ -26,9 +26,40 @@ public class SecurityCryptoConfig {
     }
 
     @Bean
-    public SecretKey jwtSecretKey(SecurityProperties properties) {
-        byte[] decoded = Base64.getDecoder()
-            .decode(properties.jwt().secretBase64());
+    public SecretKey jwtSecretKey(
+        SecurityProperties properties
+    ) {
+        if (
+            properties.jwt() == null
+            || properties.jwt()
+                .secretBase64() == null
+            || properties.jwt()
+                .secretBase64()
+                .isBlank()
+        ) {
+            throw new IllegalStateException(
+                "SUP2I JWT secret is required."
+            );
+        }
+
+        byte[] decoded;
+
+        try {
+            decoded =
+                Base64.getDecoder()
+                    .decode(
+                        properties.jwt()
+                            .secretBase64()
+                    );
+        }
+        catch (
+            IllegalArgumentException exception
+        ) {
+            throw new IllegalStateException(
+                "SUP2I JWT secret must be valid Base64.",
+                exception
+            );
+        }
 
         if (decoded.length < 32) {
             throw new IllegalStateException(
@@ -36,7 +67,10 @@ public class SecurityCryptoConfig {
             );
         }
 
-        return new SecretKeySpec(decoded, "HmacSHA256");
+        return new SecretKeySpec(
+            decoded,
+            "HmacSHA256"
+        );
     }
 
     @Bean

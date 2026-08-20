@@ -1,6 +1,7 @@
 package com.sup2i.food.security.config;
 
 import com.sup2i.food.common.api.ApiErrorResponse;
+import com.sup2i.food.common.api.RequestTrace;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,7 +16,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Map;
-import java.util.UUID;
 
 @Component
 public class RestAuthenticationEntryPoint
@@ -26,7 +26,8 @@ public class RestAuthenticationEntryPoint
     public RestAuthenticationEntryPoint(
         JsonMapper jsonMapper
     ) {
-        this.jsonMapper = jsonMapper;
+        this.jsonMapper =
+            jsonMapper;
     }
 
     @Override
@@ -39,6 +40,11 @@ public class RestAuthenticationEntryPoint
         if (response.isCommitted()) {
             return;
         }
+
+        String traceId =
+            RequestTrace.resolve(
+                request
+            );
 
         response.setStatus(
             HttpServletResponse.SC_UNAUTHORIZED
@@ -57,6 +63,11 @@ public class RestAuthenticationEntryPoint
             "Bearer"
         );
 
+        response.setHeader(
+            RequestTrace.HEADER,
+            traceId
+        );
+
         ApiErrorResponse body =
             new ApiErrorResponse(
                 OffsetDateTime.now(),
@@ -64,7 +75,7 @@ public class RestAuthenticationEntryPoint
                 "UNAUTHORIZED",
                 "Authentication required or session is no longer valid.",
                 request.getRequestURI(),
-                UUID.randomUUID().toString(),
+                traceId,
                 Map.of()
             );
 

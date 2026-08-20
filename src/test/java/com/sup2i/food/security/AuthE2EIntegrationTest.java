@@ -12,10 +12,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -25,6 +28,15 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 import com.sup2i.food.security.api.dto.MfaTotpConfirmResponse;
 import com.sup2i.food.security.api.dto.MfaTotpSetupResponse;
+import java.util.List;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 
 import java.time.Instant;
 import java.util.Map;
@@ -35,6 +47,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import com.sup2i.food.common.api.ApiErrorResponse;
+import com.sup2i.food.common.api.RequestTrace;
+
+@Import(
+    AuthE2EIntegrationTest
+        .SecurityProbeConfiguration.class
+)
 
 @Testcontainers
 @SpringBootTest(
@@ -54,7 +75,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "sup2i.security.mfa.enabled=true",
         "sup2i.security.mfa.required-roles=ADMINISTRATION,SYSTEM_ADMIN",
         "sup2i.security.mfa.encryption-key-base64=YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk=",
-        "sup2i.security.mfa.recovery-code-count=10"
+        "sup2i.security.mfa.recovery-code-count=10",
+        "sup2i.security.cors.enabled=true",
+        "sup2i.security.cors.allowed-origins=http://localhost:3000",
+        "sup2i.security.cors.max-age=1h"
     }
 )
 @ActiveProfiles("test")
@@ -66,7 +90,8 @@ class AuthE2EIntegrationTest {
 
     private static final String PASSWORD =
         "Sup2iE2E!2026";
-
+    
+        
     @Container
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES =
@@ -76,6 +101,10 @@ class AuthE2EIntegrationTest {
             .withDatabaseName("sup2i_food_test")
             .withUsername("sup2i_food_test")
             .withPassword("sup2i_food_test");
+
+    @Autowired
+    private org.springframework.security.oauth2.jwt.JwtEncoder
+    jwtEncoder;
 
     @Autowired
     private MockMvc mockMvc;
@@ -94,6 +123,78 @@ class AuthE2EIntegrationTest {
 
     @Autowired
     private JsonMapper jsonMapper;
+
+    @TestConfiguration(
+    proxyBeanMethods = false
+)
+static class SecurityProbeConfiguration {
+
+    @Bean
+    SecurityProbeController
+        securityProbeController() {
+
+        return new SecurityProbeController();
+    }
+}
+
+@RestController
+static class SecurityProbeController {
+
+    @GetMapping(
+        "/api/v1/test/security/student"
+    )
+    @PreAuthorize(
+        "hasRole('STUDENT')"
+    )
+    Map<String, String> student() {
+
+        return Map.of(
+            "status",
+            "ok"
+        );
+    }
+
+    @GetMapping(
+        "/api/v1/test/security/admin"
+    )
+    @PreAuthorize(
+        "hasAuthority('security:test:admin')"
+    )
+    Map<String, String> admin() {
+
+        return Map.of(
+            "status",
+            "ok"
+        );
+    }
+}
+
+private void assertTraceContract(
+    MvcResult result
+) throws Exception {
+
+    String header =
+        result.getResponse()
+            .getHeader(
+                RequestTrace.HEADER
+            );
+
+    assertThat(header)
+        .isNotBlank();
+
+    ApiErrorResponse body =
+        jsonMapper.readValue(
+            result.getResponse()
+                .getContentAsString(),
+            ApiErrorResponse.class
+        );
+
+    assertThat(
+        body.traceId()
+    ).isEqualTo(
+        header
+    );
+}
 
     @BeforeEach
     void seedDatabase() {
@@ -308,6 +409,552 @@ class AuthE2EIntegrationTest {
                     .value("E2E-0001")
             );
     }
+
+    @Test
+void missingBearerTokenReturnsJson401()
+    throws Exception {
+
+    MvcResult result =
+        mockMvc.perform(
+                get("/api/v1/me")
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            )
+            .andReturn();
+
+    assertTraceContract(
+        result
+    );
+}
+
+@Test
+void malformedBearerTokenReturnsJson401()
+    throws Exception {
+
+    MvcResult result =
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        "Bearer not-a-jwt"
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            )
+            .andReturn();
+
+    assertTraceContract(
+        result
+    );
+}
+
+@Test
+void invalidJwtSignatureReturnsJson401()
+    throws Exception {
+
+    AuthResponse auth =
+        login(PASSWORD);
+
+    String[] parts =
+        auth.accessToken()
+            .split("\\.");
+
+    assertThat(parts)
+        .hasSize(3);
+
+    String signature =
+        parts[2];
+
+    char replacement =
+        signature.charAt(0)
+            == 'A'
+                ? 'B'
+                : 'A';
+
+    String tampered =
+        parts[0]
+            + "."
+            + parts[1]
+            + "."
+            + replacement
+            + signature.substring(1);
+
+    MvcResult result =
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(tampered)
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            )
+            .andReturn();
+
+    assertTraceContract(
+        result
+    );
+}
+
+@Test
+void expiredJwtReturnsJson401()
+    throws Exception {
+
+    Instant now =
+        Instant.now();
+
+    JwtClaimsSet claims =
+        JwtClaimsSet.builder()
+            .issuer(
+                "sup2i-food-backend-test"
+            )
+            .subject(
+                UUID.randomUUID()
+                    .toString()
+            )
+            .issuedAt(
+                now.minusSeconds(120)
+            )
+            .expiresAt(
+                now.minusSeconds(60)
+            )
+            .id(
+                UUID.randomUUID()
+                    .toString()
+            )
+            .claim(
+                "sid",
+                UUID.randomUUID()
+                    .toString()
+            )
+            .claim(
+                "roles",
+                List.of("STUDENT")
+            )
+            .claim(
+                "permissions",
+                List.of()
+            )
+            .claim(
+                "role_scopes",
+                List.of()
+            )
+            .build();
+
+    String expired =
+        jwtEncoder.encode(
+            JwtEncoderParameters.from(
+                claims
+            )
+        )
+        .getTokenValue();
+
+    MvcResult result =
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(expired)
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UNAUTHORIZED")
+            )
+            .andReturn();
+
+    assertTraceContract(
+        result
+    );
+}
+
+@Test
+void methodSecurityAllowsExpectedRole()
+    throws Exception {
+
+    AuthResponse auth =
+        login(PASSWORD);
+
+    mockMvc.perform(
+            get(
+                "/api/v1/test/security/student"
+            )
+                .header(
+                    HttpHeaders.AUTHORIZATION,
+                    bearer(
+                        auth.accessToken()
+                    )
+                )
+        )
+        .andExpect(
+            status().isOk()
+        );
+}
+
+@Test
+void missingPermissionReturnsJson403()
+    throws Exception {
+
+    AuthResponse auth =
+        login(PASSWORD);
+
+    MvcResult result =
+        mockMvc.perform(
+                get(
+                    "/api/v1/test/security/admin"
+                )
+                    .header(
+                        HttpHeaders.AUTHORIZATION,
+                        bearer(
+                            auth.accessToken()
+                        )
+                    )
+            )
+            .andExpect(
+                status().isForbidden()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value(
+                        "PERMISSION_DENIED"
+                    )
+            )
+            .andReturn();
+
+    assertTraceContract(
+        result
+    );
+}
+
+@Test
+void requestIdIsPropagatedIntoError()
+    throws Exception {
+
+    String requestId =
+        "sup2i-e2e-request-12345";
+
+    MvcResult result =
+        mockMvc.perform(
+                get("/api/v1/me")
+                    .header(
+                        RequestTrace.HEADER,
+                        requestId
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            )
+            .andExpect(
+                header().string(
+                    RequestTrace.HEADER,
+                    requestId
+                )
+            )
+            .andExpect(
+                jsonPath("$.traceId")
+                    .value(requestId)
+            )
+            .andReturn();
+
+    assertTraceContract(
+        result
+    );
+}
+
+@Test
+void corsAllowsConfiguredOriginOnly()
+    throws Exception {
+
+    mockMvc.perform(
+            options("/api/v1/me")
+                .header(
+                    HttpHeaders.ORIGIN,
+                    "http://localhost:3000"
+                )
+                .header(
+                    HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD,
+                    "GET"
+                )
+        )
+        .andExpect(
+            status().isOk()
+        )
+        .andExpect(
+            header().string(
+                HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN,
+                "http://localhost:3000"
+            )
+        );
+
+    mockMvc.perform(
+            options("/api/v1/me")
+                .header(
+                    HttpHeaders.ORIGIN,
+                    "https://evil.example"
+                )
+                .header(
+                    HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD,
+                    "GET"
+                )
+        )
+        .andExpect(
+            status().isForbidden()
+        )
+        .andExpect(
+            header().doesNotExist(
+                HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN
+            )
+        );
+}
+
+@Test
+void totpCodeCannotBeReplayed()
+    throws Exception {
+
+    grantRole(
+        "ADMINISTRATION"
+    );
+
+    MfaTotpSetupResponse setup =
+        setupTotp();
+
+    byte[] secret =
+        Base32Codec.decode(
+            setup.secret()
+        );
+
+    String code =
+        totpService.currentCode(
+            secret
+        );
+
+    mockMvc.perform(
+            post(
+                "/api/v1/auth/mfa/totp/confirm"
+            )
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "methodId",
+                            setup.methodId()
+                                .toString(),
+                            "code",
+                            code
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isOk()
+        );
+
+    /*
+     * Même code déjà consommé lors
+     * de la confirmation enrollment.
+     */
+    mockMvc.perform(
+            post(
+                "/api/v1/auth/login"
+            )
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "mfaCode",
+                            code
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isUnauthorized()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("UNAUTHORIZED")
+        );
+}
+
+@Test
+void invalidRecoveryCodeIsRejected()
+    throws Exception {
+
+    grantRole(
+        "SYSTEM_ADMIN"
+    );
+
+    MfaTotpSetupResponse setup =
+        setupTotp();
+
+    byte[] secret =
+        Base32Codec.decode(
+            setup.secret()
+        );
+
+    String code =
+        totpService.currentCode(
+            secret
+        );
+
+    mockMvc.perform(
+            post(
+                "/api/v1/auth/mfa/totp/confirm"
+            )
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "methodId",
+                            setup.methodId()
+                                .toString(),
+                            "code",
+                            code
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isOk()
+        );
+
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "recoveryCode",
+                            "RC-invalid-recovery-code"
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isUnauthorized()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("UNAUTHORIZED")
+        );
+}
+
+@Test
+void invalidTotpEnrollmentConfirmationIsRejected()
+    throws Exception {
+
+    grantRole(
+        "ADMINISTRATION"
+    );
+
+    MfaTotpSetupResponse setup =
+        setupTotp();
+
+    byte[] secret =
+        Base32Codec.decode(
+            setup.secret()
+        );
+
+    String valid =
+        totpService.currentCode(
+            secret
+        );
+
+    String invalid =
+        valid.equals("000000")
+            ? "000001"
+            : "000000";
+
+    mockMvc.perform(
+            post(
+                "/api/v1/auth/mfa/totp/confirm"
+            )
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "methodId",
+                            setup.methodId()
+                                .toString(),
+                            "code",
+                            invalid
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isUnauthorized()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("UNAUTHORIZED")
+        );
+
+    Long active =
+        jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM user_mfa_methods
+            WHERE id = ?
+              AND status = 'ACTIVE'
+            """,
+            Long.class,
+            setup.methodId()
+        );
+
+    assertThat(active)
+        .isZero();
+}
+
+
 
     @Test
     void refreshRotatesToken() throws Exception {

@@ -226,13 +226,14 @@ public class MfaEnrollmentService {
                 MfaMethodType.TOTP
             );
 
-        if (
-            !totpService.verify(
+        TotpService.Verification verification =
+            totpService.verifyWithCounter(
                 secret,
                 code,
                 null
-            )
-        ) {
+            );
+
+        if (!verification.valid()) {
             throw new BadCredentialsException(
                 "Invalid MFA code."
             );
@@ -243,8 +244,9 @@ public class MfaEnrollmentService {
 
         method.activate(now);
         method.setPrimary(true);
-        method.markUsed(now);
-
+        method.markUsed(
+            verification.usedAt()
+        );
         methodRepository.save(method);
 
         int recoveryCount =

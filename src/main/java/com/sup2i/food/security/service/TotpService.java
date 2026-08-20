@@ -10,6 +10,7 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Locale;
 
 @Service
@@ -29,20 +30,31 @@ public class TotpService {
         String submittedCode,
         OffsetDateTime lastUsedAt
     ) {
+        return verifyWithCounter(
+            secret,
+            submittedCode,
+            lastUsedAt
+        ).valid();
+    }
+
+    public Verification verifyWithCounter(
+        byte[] secret,
+        String submittedCode,
+        OffsetDateTime lastUsedAt
+    ) {
         if (
             submittedCode == null
             || !submittedCode.matches(
                 "\\d{6}"
             )
         ) {
-            return false;
+            return Verification.invalid();
         }
 
-        Instant now =
-            Instant.now();
-
         long currentCounter =
-            counter(now);
+            counter(
+                Instant.now()
+            );
 
         long lastUsedCounter =
             lastUsedAt == null
@@ -57,7 +69,8 @@ public class TotpService {
             offset++
         ) {
             long candidateCounter =
-                currentCounter + offset;
+                currentCounter
+                    + offset;
 
             if (
                 candidateCounter
@@ -72,7 +85,7 @@ public class TotpService {
                     candidateCounter
                 );
 
-            if (
+            boolean matches =
                 MessageDigest.isEqual(
                     expected.getBytes(
                         StandardCharsets.US_ASCII
@@ -80,13 +93,27 @@ public class TotpService {
                     submittedCode.getBytes(
                         StandardCharsets.US_ASCII
                     )
-                )
-            ) {
-                return true;
+                );
+
+            if (matches) {
+
+                Instant slot =
+                    Instant.ofEpochSecond(
+                        candidateCounter
+                            * PERIOD_SECONDS
+                    );
+
+                return new Verification(
+                    true,
+                    OffsetDateTime.ofInstant(
+                        slot,
+                        ZoneOffset.UTC
+                    )
+                );
             }
         }
 
-        return false;
+        return Verification.invalid();
     }
 
     public String currentCode(
@@ -149,49 +176,63 @@ public class TotpService {
             int offset =
                 hash[
                     hash.length - 1
-                ]
-                    & 0x0f;
+                ] & 0x0f;
 
             int binary =
                 (
                     (
                         hash[offset]
                             & 0x7f
-                    )
-                        << 24
+                    ) << 24
                 )
-                    | (
-                        (
-                            hash[offset + 1]
-                                & 0xff
-                        )
-                            << 16
-                    )
-                    | (
-                        (
-                            hash[offset + 2]
-                                & 0xff
-                        )
-                            << 8
-                    )
-                    | (
-                        hash[offset + 3]
+                | (
+                    (
+                        hash[offset + 1]
                             & 0xff
-                    );
+                    ) << 16
+                )
+                | (
+                    (
+                        hash[offset + 2]
+                            & 0xff
+                    ) << 8
+                )
+                | (
+                    hash[offset + 3]
+                        & 0xff
+                );
 
             int otp =
-                binary % 1_000_000;
+                binary
+                    % 1_000_000;
 
             return String.format(
                 Locale.ROOT,
                 "%06d",
                 otp
             );
-
-        } catch (GeneralSecurityException exception) {
+        }
+        catch (
+            GeneralSecurityException exception
+        ) {
             throw new IllegalStateException(
                 "Unable to calculate TOTP.",
                 exception
+            );
+        }
+    }
+
+    public record Verification(
+        boolean valid,
+        OffsetDateTime usedAt
+    ) {
+
+        public static Verification
+            invalid() {
+
+            return new Verification(
+                false,
+                null
             );
         }
     }

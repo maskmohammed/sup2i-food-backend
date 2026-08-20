@@ -39,3 +39,7 @@ sup2i:
         - SYSTEM_ADMIN
       encryption-key-base64: ${SUP2I_MFA_ENCRYPTION_KEY_BASE64}
       recovery-code-count: 10
+    cors:
+      enabled: ${SUP2I_CORS_ENABLED:false}
+      allowed-origins: ${SUP2I_CORS_ALLOWED_ORIGINS:}
+      max-age: 1h

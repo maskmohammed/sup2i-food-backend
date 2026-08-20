@@ -3,35 +3,41 @@ package com.sup2i.food.common.api;
 import com.sup2i.food.security.exception.AccountBlockedException;
 import com.sup2i.food.security.exception.AccountSuspendedException;
 import com.sup2i.food.security.exception.LoginRateLimitedException;
+import com.sup2i.food.security.exception.MfaAlreadyConfiguredException;
+import com.sup2i.food.security.exception.MfaRequiredException;
+import com.sup2i.food.security.exception.MfaSetupRequiredException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import com.sup2i.food.security.exception.MfaAlreadyConfiguredException;
-import com.sup2i.food.security.exception.MfaRequiredException;
-import com.sup2i.food.security.exception.MfaSetupRequiredException;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiErrorResponse> validation(
-        MethodArgumentNotValidException exception,
-        HttpServletRequest request
-    ) {
+    @ExceptionHandler(
+        MethodArgumentNotValidException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        validation(
+            MethodArgumentNotValidException exception,
+            HttpServletRequest request
+        ) {
+
         Map<String, Object> fields =
             new LinkedHashMap<>();
 
-        exception.getBindingResult()
+        exception
+            .getBindingResult()
             .getFieldErrors()
             .forEach(error ->
                 fields.put(
@@ -45,7 +51,10 @@ public class GlobalExceptionHandler {
             "VALIDATION_ERROR",
             "Request validation failed.",
             request,
-            Map.of("fields", fields)
+            Map.of(
+                "fields",
+                fields
+            )
         );
     }
 
@@ -53,10 +62,12 @@ public class GlobalExceptionHandler {
         BadCredentialsException.class,
         CredentialsExpiredException.class
     })
-    public ResponseEntity<ApiErrorResponse> unauthorized(
-        RuntimeException exception,
-        HttpServletRequest request
-    ) {
+    public ResponseEntity<ApiErrorResponse>
+        unauthorized(
+            RuntimeException exception,
+            HttpServletRequest request
+        ) {
+
         return error(
             HttpStatus.UNAUTHORIZED,
             "UNAUTHORIZED",
@@ -66,11 +77,33 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(AccountBlockedException.class)
-    public ResponseEntity<ApiErrorResponse> blocked(
-        AccountBlockedException exception,
-        HttpServletRequest request
-    ) {
+    @ExceptionHandler(
+        AccessDeniedException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        permissionDenied(
+            AccessDeniedException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.FORBIDDEN,
+            "PERMISSION_DENIED",
+            "You do not have permission to access this resource.",
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        AccountBlockedException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        blocked(
+            AccountBlockedException exception,
+            HttpServletRequest request
+        ) {
+
         return error(
             HttpStatus.FORBIDDEN,
             "ACCOUNT_BLOCKED",
@@ -80,11 +113,15 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(AccountSuspendedException.class)
-    public ResponseEntity<ApiErrorResponse> suspended(
-        AccountSuspendedException exception,
-        HttpServletRequest request
-    ) {
+    @ExceptionHandler(
+        AccountSuspendedException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        suspended(
+            AccountSuspendedException exception,
+            HttpServletRequest request
+        ) {
+
         return error(
             HttpStatus.FORBIDDEN,
             "ACCOUNT_SUSPENDED",
@@ -94,11 +131,15 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(LoginRateLimitedException.class)
-    public ResponseEntity<ApiErrorResponse> rateLimited(
-        LoginRateLimitedException exception,
-        HttpServletRequest request
-    ) {
+    @ExceptionHandler(
+        LoginRateLimitedException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        rateLimited(
+            LoginRateLimitedException exception,
+            HttpServletRequest request
+        ) {
+
         return error(
             HttpStatus.TOO_MANY_REQUESTS,
             "RATE_LIMITED",
@@ -108,34 +149,15 @@ public class GlobalExceptionHandler {
         );
     }
 
-    private ResponseEntity<ApiErrorResponse> error(
-        HttpStatus status,
-        String code,
-        String message,
-        HttpServletRequest request,
-        Map<String, Object> details
-    ) {
-        ApiErrorResponse body =
-            new ApiErrorResponse(
-                OffsetDateTime.now(),
-                status.value(),
-                code,
-                message,
-                request.getRequestURI(),
-                UUID.randomUUID().toString(),
-                details
-            );
+    @ExceptionHandler(
+        MfaRequiredException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        mfaRequired(
+            MfaRequiredException exception,
+            HttpServletRequest request
+        ) {
 
-        return ResponseEntity
-            .status(status)
-            .body(body);
-    }
-
-    @ExceptionHandler(MfaRequiredException.class)
-    public ResponseEntity<ApiErrorResponse> mfaRequired(
-        MfaRequiredException exception,
-        HttpServletRequest request
-    ) {
         return error(
             HttpStatus.UNAUTHORIZED,
             "MFA_REQUIRED",
@@ -143,7 +165,7 @@ public class GlobalExceptionHandler {
             request,
             Map.of(
                 "methods",
-                java.util.List.of(
+                List.of(
                     "TOTP",
                     "RECOVERY_CODE"
                 )
@@ -151,11 +173,15 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(MfaSetupRequiredException.class)
-    public ResponseEntity<ApiErrorResponse> mfaSetupRequired(
-        MfaSetupRequiredException exception,
-        HttpServletRequest request
-    ) {
+    @ExceptionHandler(
+        MfaSetupRequiredException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        mfaSetupRequired(
+            MfaSetupRequiredException exception,
+            HttpServletRequest request
+        ) {
+
         return error(
             HttpStatus.FORBIDDEN,
             "MFA_SETUP_REQUIRED",
@@ -168,11 +194,15 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(MfaAlreadyConfiguredException.class)
-    public ResponseEntity<ApiErrorResponse> mfaAlreadyConfigured(
-        MfaAlreadyConfiguredException exception,
-        HttpServletRequest request
-    ) {
+    @ExceptionHandler(
+        MfaAlreadyConfiguredException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        mfaAlreadyConfigured(
+            MfaAlreadyConfiguredException exception,
+            HttpServletRequest request
+        ) {
+
         return error(
             HttpStatus.CONFLICT,
             "MFA_ALREADY_CONFIGURED",
@@ -180,5 +210,39 @@ public class GlobalExceptionHandler {
             request,
             Map.of()
         );
+    }
+
+    private ResponseEntity<ApiErrorResponse>
+        error(
+            HttpStatus status,
+            String code,
+            String message,
+            HttpServletRequest request,
+            Map<String, Object> details
+        ) {
+
+        String traceId =
+            RequestTrace.resolve(
+                request
+            );
+
+        ApiErrorResponse body =
+            new ApiErrorResponse(
+                OffsetDateTime.now(),
+                status.value(),
+                code,
+                message,
+                request.getRequestURI(),
+                traceId,
+                details
+            );
+
+        return ResponseEntity
+            .status(status)
+            .header(
+                RequestTrace.HEADER,
+                traceId
+            )
+            .body(body);
     }
 }

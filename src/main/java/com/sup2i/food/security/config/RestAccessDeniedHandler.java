@@ -1,6 +1,7 @@
 package com.sup2i.food.security.config;
 
 import com.sup2i.food.common.api.ApiErrorResponse;
+import com.sup2i.food.common.api.RequestTrace;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -14,7 +15,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Map;
-import java.util.UUID;
 
 @Component
 public class RestAccessDeniedHandler
@@ -25,7 +25,8 @@ public class RestAccessDeniedHandler
     public RestAccessDeniedHandler(
         JsonMapper jsonMapper
     ) {
-        this.jsonMapper = jsonMapper;
+        this.jsonMapper =
+            jsonMapper;
     }
 
     @Override
@@ -39,6 +40,11 @@ public class RestAccessDeniedHandler
             return;
         }
 
+        String traceId =
+            RequestTrace.resolve(
+                request
+            );
+
         response.setStatus(
             HttpServletResponse.SC_FORBIDDEN
         );
@@ -51,6 +57,11 @@ public class RestAccessDeniedHandler
             StandardCharsets.UTF_8.name()
         );
 
+        response.setHeader(
+            RequestTrace.HEADER,
+            traceId
+        );
+
         ApiErrorResponse body =
             new ApiErrorResponse(
                 OffsetDateTime.now(),
@@ -58,7 +69,7 @@ public class RestAccessDeniedHandler
                 "PERMISSION_DENIED",
                 "You do not have permission to access this resource.",
                 request.getRequestURI(),
-                UUID.randomUUID().toString(),
+                traceId,
                 Map.of()
             );
 

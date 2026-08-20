@@ -90,8 +90,8 @@ class AuthE2EIntegrationTest {
 
     private static final String PASSWORD =
         "Sup2iE2E!2026";
-    
-        
+
+
     @Container
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES =

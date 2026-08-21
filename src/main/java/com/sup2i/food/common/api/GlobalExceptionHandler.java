@@ -15,6 +15,10 @@ import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.sup2i.food.catalog.exception.CatalogConflictException;
+import com.sup2i.food.catalog.exception.CatalogNotFoundException;
+import com.sup2i.food.catalog.exception.ProductUnavailableException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -23,6 +27,78 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(
+        CatalogNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        catalogNotFound(
+            CatalogNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        CatalogConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        catalogConflict(
+            CatalogConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        ProductUnavailableException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        productUnavailable(
+            ProductUnavailableException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.UNPROCESSABLE_CONTENT,
+            "PRODUCT_UNAVAILABLE",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        HttpMessageNotReadableException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        unreadableRequest(
+            HttpMessageNotReadableException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            "Request body is invalid or contains an unsupported value.",
+            request,
+            Map.of()
+        );
+    }
 
     @ExceptionHandler(
         MethodArgumentNotValidException.class

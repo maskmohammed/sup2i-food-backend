@@ -1,5 +1,7 @@
 package com.sup2i.food.catalog.service;
 
+import com.sup2i.food.catalog.exception.CatalogValidationException;
+
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
@@ -43,7 +45,7 @@ public class CatalogNormalizationService {
                 );
 
         if (normalized.isBlank()) {
-            throw new IllegalArgumentException(
+            throw new CatalogValidationException(
                 "Category slug cannot be empty."
             );
         }

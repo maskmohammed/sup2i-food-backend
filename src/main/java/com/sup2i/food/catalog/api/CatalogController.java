@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -34,14 +33,26 @@ public class CatalogController {
     @PreAuthorize(
         "hasAuthority('catalog.read')"
     )
-    public List<CategoryResponse>
+    public PageResponse<CategoryResponse>
         categories(
-            JwtAuthenticationToken authentication
+            JwtAuthenticationToken authentication,
+
+            @RequestParam(
+                defaultValue = "0"
+            )
+            int page,
+
+            @RequestParam(
+                defaultValue = "20"
+            )
+            int size
         ) {
 
         return catalogQueryService
             .categories(
-                userId(authentication)
+                userId(authentication),
+                page,
+                size
             );
     }
 

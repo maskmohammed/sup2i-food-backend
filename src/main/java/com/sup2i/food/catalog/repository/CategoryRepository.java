@@ -1,6 +1,8 @@
 package com.sup2i.food.catalog.repository;
 
 import com.sup2i.food.catalog.domain.Category;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -13,6 +15,12 @@ public interface CategoryRepository
     List<Category>
         findAllByOrganization_IdAndActiveTrueOrderByDisplayOrderAscNameAsc(
             UUID organizationId
+        );
+
+    Page<Category>
+        findAllByOrganization_IdAndActiveTrue(
+            UUID organizationId,
+            Pageable pageable
         );
 
     Optional<Category>

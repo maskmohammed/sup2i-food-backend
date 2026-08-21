@@ -18,7 +18,6 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -47,21 +46,49 @@ public class CatalogQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<CategoryResponse>
+    public PageResponse<CategoryResponse>
         categories(
-            UUID userId
+            UUID userId,
+            int page,
+            int size
         ) {
 
         UUID organizationId =
             organizationId(userId);
 
-        return categoryRepository
-            .findAllByOrganization_IdAndActiveTrueOrderByDisplayOrderAscNameAsc(
-                organizationId
-            )
-            .stream()
-            .map(this::toCategoryResponse)
-            .toList();
+        int safePage =
+            Math.max(page, 0);
+
+        int safeSize =
+            Math.min(
+                Math.max(size, 1),
+                MAX_PAGE_SIZE
+            );
+
+        PageRequest pageable =
+            PageRequest.of(
+                safePage,
+                safeSize,
+                Sort.by(
+                    Sort.Order.asc("displayOrder"),
+                    Sort.Order.asc("name"),
+                    Sort.Order.asc("id")
+                )
+            );
+
+        Page<CategoryResponse> result =
+            categoryRepository
+                .findAllByOrganization_IdAndActiveTrue(
+                    organizationId,
+                    pageable
+                )
+                .map(
+                    this::toCategoryResponse
+                );
+
+        return PageResponse.from(
+            result
+        );
     }
 
     @Transactional(readOnly = true)

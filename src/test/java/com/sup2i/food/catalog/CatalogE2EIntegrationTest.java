@@ -913,6 +913,309 @@ class CatalogE2EIntegrationTest {
             );
     }
 
+    @Test
+    void categoryListReturnsPageResponseAndHonorsSize()
+        throws Exception {
+
+        insertCategory(
+            organizationId,
+            "Hardening Category A",
+            "hardening-category-a",
+            true
+        );
+
+        insertCategory(
+            organizationId,
+            "Hardening Category B",
+            "hardening-category-b",
+            true
+        );
+
+        Long expectedTotal =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM categories
+                WHERE organization_id = ?
+                  AND is_active = TRUE
+                """,
+                Long.class,
+                organizationId
+            );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/categories"
+                )
+                    .queryParam(
+                        "page",
+                        "0"
+                    )
+                    .queryParam(
+                        "size",
+                        "1"
+                    )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.content.length()")
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath("$.page")
+                    .value(0)
+            )
+            .andExpect(
+                jsonPath("$.size")
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath("$.totalElements")
+                    .value(
+                        expectedTotal.intValue()
+                    )
+            );
+    }
+
+    @Test
+    void catalogErrorPropagatesRequestId()
+        throws Exception {
+
+        String requestId =
+            "catalog-hardening-"
+                + UUID.randomUUID();
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{id}",
+                    UUID.randomUUID()
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+                    .header(
+                        "X-Request-ID",
+                        requestId
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                    .header()
+                    .string(
+                        "X-Request-ID",
+                        requestId
+                    )
+            )
+            .andExpect(
+                jsonPath("$.traceId")
+                    .value(requestId)
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+    }
+    @Test
+    void punctuationOnlyCategorySlugReturnsValidationError()
+        throws Exception {
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/categories"
+                )
+                    .header(
+                        "Authorization",
+                        bearer("category.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "name": "Invalid Slug",
+                          "slug": " !!! --- ___ ... ",
+                          "displayOrder": 0,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+    }
+
+    @Test
+    void productNumericDatabaseLimitsAreAccepted()
+        throws Exception {
+
+        UUID categoryId =
+            insertCategory(
+                organizationId,
+                "Numeric Limits",
+                "numeric-limits",
+                true
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/products"
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "categoryId": "%s",
+                          "sku": "NUMERIC-LIMIT",
+                          "name": "Numeric Limit Product",
+                          "productType": "PACKAGED",
+                          "basePrice": 9999999999.99,
+                          "taxRate": 100.00,
+                          "active": true
+                        }
+                        """.formatted(
+                            categoryId
+                        )
+                    )
+            )
+            .andExpect(
+                status().isCreated()
+            );
+
+        BigDecimal storedPrice =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT base_price
+                FROM products
+                WHERE organization_id = ?
+                  AND sku = 'NUMERIC-LIMIT'
+                """,
+                BigDecimal.class,
+                organizationId
+            );
+
+        assertThat(storedPrice)
+            .isEqualByComparingTo(
+                "9999999999.99"
+            );
+    }
+
+    @Test
+    void productBasePricePrecisionOverflowReturnsValidationError()
+        throws Exception {
+
+        UUID categoryId =
+            insertCategory(
+                organizationId,
+                "Price Overflow",
+                "price-overflow",
+                true
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/products"
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "categoryId": "%s",
+                          "sku": "PRICE-OVERFLOW",
+                          "name": "Price Overflow Product",
+                          "productType": "PACKAGED",
+                          "basePrice": 10000000000.00,
+                          "taxRate": 0,
+                          "active": true
+                        }
+                        """.formatted(
+                            categoryId
+                        )
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+    }
+
+    @Test
+    void productTaxRateScaleOverflowReturnsValidationError()
+        throws Exception {
+
+        UUID categoryId =
+            insertCategory(
+                organizationId,
+                "Tax Scale",
+                "tax-scale",
+                true
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/products"
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "categoryId": "%s",
+                          "sku": "TAX-SCALE",
+                          "name": "Tax Scale Product",
+                          "productType": "PACKAGED",
+                          "basePrice": 10.00,
+                          "taxRate": 10.001,
+                          "active": true
+                        }
+                        """.formatted(
+                            categoryId
+                        )
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+    }
     // =========================================================
     // VALIDATION / BAD JSON
     // =========================================================

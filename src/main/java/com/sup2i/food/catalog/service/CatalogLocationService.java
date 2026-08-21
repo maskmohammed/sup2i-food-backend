@@ -6,6 +6,7 @@ import com.sup2i.food.catalog.domain.Product;
 import com.sup2i.food.catalog.domain.ProductLocationSetting;
 import com.sup2i.food.catalog.exception.CatalogConflictException;
 import com.sup2i.food.catalog.exception.CatalogNotFoundException;
+import com.sup2i.food.catalog.exception.ProductUnavailableException;
 import com.sup2i.food.catalog.repository.ProductLocationSettingRepository;
 import com.sup2i.food.catalog.repository.ProductRepository;
 import com.sup2i.food.identity.domain.User;
@@ -144,16 +145,27 @@ public class CatalogLocationService {
         UUID organizationId =
             user.getOrganization().getId();
 
-        productRepository
-            .findCatalogProduct(
-                productId,
-                organizationId
-            )
-            .orElseThrow(() ->
-                new CatalogNotFoundException(
-                    "Product does not exist."
+        Product product =
+            productRepository
+                .findCatalogProduct(
+                    productId,
+                    organizationId
                 )
+                .orElseThrow(() ->
+                    new CatalogNotFoundException(
+                        "Product does not exist."
+                    )
+                );
+
+        if (
+            !product.isActive()
+            || !product.getCategory()
+                .isActive()
+        ) {
+            throw new ProductUnavailableException(
+                "Product is not available."
             );
+        }
 
         return settingRepository
             .findAllByProduct_IdOrderByLocation_NameAsc(

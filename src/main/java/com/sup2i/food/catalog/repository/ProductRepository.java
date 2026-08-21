@@ -18,18 +18,32 @@ public interface ProductRepository
         String sku
     );
 
-    @Query("""
-        select p
-        from Product p
-        join fetch p.category c
-        where p.organization.id = :organizationId
-          and p.active = true
-          and c.active = true
-          and (
-                :categoryId is null
-                or c.id = :categoryId
-              )
-        """)
+    @Query(
+        value = """
+            select p
+            from Product p
+            join fetch p.category c
+            where p.organization.id = :organizationId
+              and p.active = true
+              and c.active = true
+              and (
+                    :categoryId is null
+                    or c.id = :categoryId
+                  )
+            """,
+        countQuery = """
+            select count(p)
+            from Product p
+            join p.category c
+            where p.organization.id = :organizationId
+              and p.active = true
+              and c.active = true
+              and (
+                    :categoryId is null
+                    or c.id = :categoryId
+                  )
+            """
+    )
     Page<Product> findCatalogProducts(
         @Param("organizationId")
         UUID organizationId,

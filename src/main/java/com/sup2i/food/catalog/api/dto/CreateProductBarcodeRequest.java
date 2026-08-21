@@ -1,6 +1,7 @@
 package com.sup2i.food.catalog.api.dto;
 
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -16,6 +17,10 @@ public record CreateProductBarcodeRequest(
     String barcode,
 
     @DecimalMin("0.001")
+    @Digits(
+        integer = 11,
+        fraction = 3
+    )
     BigDecimal packQuantity,
 
     Boolean primary,

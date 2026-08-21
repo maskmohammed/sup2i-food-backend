@@ -1424,6 +1424,88 @@ class CatalogMetadataE2EIntegrationTest {
     }
 
     @Test
+    void inactiveProductLocationsReturnProductUnavailable()
+        throws Exception {
+
+        UUID categoryId =
+            insertCategory(
+                organizationId,
+                "Inactive Location Product Category"
+            );
+
+        UUID productId =
+            insertProduct(
+                organizationId,
+                categoryId,
+                "LOC-INACTIVE-P",
+                false
+            );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/locations",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isUnprocessableContent()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PRODUCT_UNAVAILABLE")
+            );
+    }
+
+    @Test
+    void productUnderInactiveCategoryLocationsReturnProductUnavailable()
+        throws Exception {
+
+        UUID categoryId =
+            insertCategory(
+                organizationId,
+                "Inactive Location Category"
+            );
+
+        UUID productId =
+            insertProduct(
+                organizationId,
+                categoryId,
+                "LOC-INACTIVE-CAT",
+                true
+            );
+
+        jdbcTemplate.update(
+            """
+            UPDATE categories
+            SET is_active = FALSE
+            WHERE id = ?
+            """,
+            categoryId
+        );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/locations",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isUnprocessableContent()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PRODUCT_UNAVAILABLE")
+            );
+    }
+    @Test
     void inactiveProductDietaryMetadataReturnsProductUnavailable()
         throws Exception {
 

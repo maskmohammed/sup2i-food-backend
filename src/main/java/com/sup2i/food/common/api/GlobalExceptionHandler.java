@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.sup2i.food.catalog.exception.CatalogConflictException;
 import com.sup2i.food.catalog.exception.CatalogNotFoundException;
+import com.sup2i.food.catalog.exception.CatalogValidationException;
 import com.sup2i.food.catalog.exception.ProductUnavailableException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
@@ -28,6 +29,23 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(
+        CatalogValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        catalogValidation(
+            CatalogValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
     @ExceptionHandler(
         CatalogNotFoundException.class
     )

@@ -19,6 +19,9 @@ import com.sup2i.food.catalog.exception.CatalogConflictException;
 import com.sup2i.food.catalog.exception.CatalogNotFoundException;
 import com.sup2i.food.catalog.exception.CatalogValidationException;
 import com.sup2i.food.catalog.exception.ProductUnavailableException;
+import com.sup2i.food.inventory.exception.InventoryConflictException;
+import com.sup2i.food.inventory.exception.InventoryNotFoundException;
+import com.sup2i.food.inventory.exception.InventoryValidationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -28,6 +31,59 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(
+        InventoryValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        inventoryValidation(
+            InventoryValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        InventoryNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        inventoryNotFound(
+            InventoryNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        InventoryConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        inventoryConflict(
+            InventoryConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
 
     @ExceptionHandler(
         CatalogValidationException.class

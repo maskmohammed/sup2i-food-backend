@@ -1,5 +1,8 @@
-package com.sup2i.food.catalog.domain;
+package com.sup2i.food.inventory.domain;
 
+import com.sup2i.food.catalog.domain.Ingredient;
+import com.sup2i.food.catalog.domain.Product;
+import com.sup2i.food.catalog.domain.ProductVariant;
 import com.sup2i.food.common.domain.MeasurementUnit;
 import com.sup2i.food.organization.domain.Organization;
 import jakarta.persistence.Column;
@@ -13,27 +16,16 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(
-    name = "ingredients",
-    uniqueConstraints = {
-        @UniqueConstraint(
-            name = "uq_ingredients_org_code",
-            columnNames = {
-                "organization_id",
-                "code"
-            }
-        )
-    }
-)
-public class Ingredient {
+@Table(name = "stock_items")
+public class StockItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -46,19 +38,17 @@ public class Ingredient {
     )
     private Organization organization;
 
-    @Column(
-        name = "code",
-        nullable = false,
-        length = 80
-    )
-    private String code;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id")
+    private Product product;
 
-    @Column(
-        name = "name",
-        nullable = false,
-        length = 150
-    )
-    private String name;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "variant_id")
+    private ProductVariant variant;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ingredient_id")
+    private Ingredient ingredient;
 
     @Enumerated(EnumType.STRING)
     @Column(
@@ -69,16 +59,17 @@ public class Ingredient {
     private MeasurementUnit baseUnit;
 
     @Column(
-        name = "track_stock",
-        nullable = false
+        name = "low_stock_threshold",
+        precision = 14,
+        scale = 3
     )
-    private boolean trackStock = true;
+    private BigDecimal lowStockThreshold;
 
     @Column(
-        name = "is_active",
+        name = "track_expiry",
         nullable = false
     )
-    private boolean active = true;
+    private boolean trackExpiry;
 
     @CreationTimestamp
     @Column(
@@ -95,21 +86,26 @@ public class Ingredient {
     )
     private OffsetDateTime updatedAt;
 
-    protected Ingredient() {
+    protected StockItem() {
     }
 
-    public Ingredient(
+    public StockItem(
         Organization organization,
-        String code,
-        String name,
+        Product product,
+        ProductVariant variant,
+        Ingredient ingredient,
         MeasurementUnit baseUnit,
-        boolean active
+        BigDecimal lowStockThreshold,
+        boolean trackExpiry
     ) {
         this.organization = organization;
-        this.code = code;
-        this.name = name;
+        this.product = product;
+        this.variant = variant;
+        this.ingredient = ingredient;
         this.baseUnit = baseUnit;
-        this.active = active;
+        this.lowStockThreshold =
+            lowStockThreshold;
+        this.trackExpiry = trackExpiry;
     }
 
     public UUID getId() {
@@ -120,42 +116,28 @@ public class Ingredient {
         return organization;
     }
 
-    public String getCode() {
-        return code;
+    public Product getProduct() {
+        return product;
     }
 
-    public String getName() {
-        return name;
+    public ProductVariant getVariant() {
+        return variant;
+    }
+
+    public Ingredient getIngredient() {
+        return ingredient;
     }
 
     public MeasurementUnit getBaseUnit() {
         return baseUnit;
     }
 
-    public boolean isTrackStock() {
-        return trackStock;
+    public BigDecimal getLowStockThreshold() {
+        return lowStockThreshold;
     }
 
-    public void setTrackStock(
-        boolean trackStock
-    ) {
-        this.trackStock = trackStock;
-    }
-
-    public boolean isActive() {
-        return active;
-    }
-
-    public void update(
-        String code,
-        String name,
-        MeasurementUnit baseUnit,
-        boolean active
-    ) {
-        this.code = code;
-        this.name = name;
-        this.baseUnit = baseUnit;
-        this.active = active;
+    public boolean isTrackExpiry() {
+        return trackExpiry;
     }
 
     public OffsetDateTime getCreatedAt() {
@@ -164,5 +146,16 @@ public class Ingredient {
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public void updateConfiguration(
+        BigDecimal lowStockThreshold,
+        boolean trackExpiry
+    ) {
+        this.lowStockThreshold =
+            lowStockThreshold;
+
+        this.trackExpiry =
+            trackExpiry;
     }
 }

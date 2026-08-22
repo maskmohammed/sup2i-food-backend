@@ -20,4 +20,10 @@ public interface ProductVariantRepository
             UUID id,
             UUID productId
         );
+
+    Optional<ProductVariant>
+        findByIdAndProduct_Organization_Id(
+            UUID id,
+            UUID organizationId
+        );
 }

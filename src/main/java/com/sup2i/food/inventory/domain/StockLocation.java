@@ -1,7 +1,6 @@
-package com.sup2i.food.catalog.domain;
+package com.sup2i.food.inventory.domain;
 
-import com.sup2i.food.common.domain.MeasurementUnit;
-import com.sup2i.food.organization.domain.Organization;
+import com.sup2i.food.organization.domain.Location;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,7 +12,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -21,19 +19,8 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(
-    name = "ingredients",
-    uniqueConstraints = {
-        @UniqueConstraint(
-            name = "uq_ingredients_org_code",
-            columnNames = {
-                "organization_id",
-                "code"
-            }
-        )
-    }
-)
-public class Ingredient {
+@Table(name = "stock_locations")
+public class StockLocation {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -41,38 +28,25 @@ public class Ingredient {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(
-        name = "organization_id",
+        name = "location_id",
         nullable = false
     )
-    private Organization organization;
-
-    @Column(
-        name = "code",
-        nullable = false,
-        length = 80
-    )
-    private String code;
+    private Location location;
 
     @Column(
         name = "name",
         nullable = false,
-        length = 150
+        length = 120
     )
     private String name;
 
     @Enumerated(EnumType.STRING)
     @Column(
-        name = "base_unit",
+        name = "type",
         nullable = false,
-        length = 20
+        length = 30
     )
-    private MeasurementUnit baseUnit;
-
-    @Column(
-        name = "track_stock",
-        nullable = false
-    )
-    private boolean trackStock = true;
+    private StockLocationType type;
 
     @Column(
         name = "is_active",
@@ -95,20 +69,18 @@ public class Ingredient {
     )
     private OffsetDateTime updatedAt;
 
-    protected Ingredient() {
+    protected StockLocation() {
     }
 
-    public Ingredient(
-        Organization organization,
-        String code,
+    public StockLocation(
+        Location location,
         String name,
-        MeasurementUnit baseUnit,
+        StockLocationType type,
         boolean active
     ) {
-        this.organization = organization;
-        this.code = code;
+        this.location = location;
         this.name = name;
-        this.baseUnit = baseUnit;
+        this.type = type;
         this.active = active;
     }
 
@@ -116,46 +88,20 @@ public class Ingredient {
         return id;
     }
 
-    public Organization getOrganization() {
-        return organization;
-    }
-
-    public String getCode() {
-        return code;
+    public Location getLocation() {
+        return location;
     }
 
     public String getName() {
         return name;
     }
 
-    public MeasurementUnit getBaseUnit() {
-        return baseUnit;
-    }
-
-    public boolean isTrackStock() {
-        return trackStock;
-    }
-
-    public void setTrackStock(
-        boolean trackStock
-    ) {
-        this.trackStock = trackStock;
+    public StockLocationType getType() {
+        return type;
     }
 
     public boolean isActive() {
         return active;
-    }
-
-    public void update(
-        String code,
-        String name,
-        MeasurementUnit baseUnit,
-        boolean active
-    ) {
-        this.code = code;
-        this.name = name;
-        this.baseUnit = baseUnit;
-        this.active = active;
     }
 
     public OffsetDateTime getCreatedAt() {

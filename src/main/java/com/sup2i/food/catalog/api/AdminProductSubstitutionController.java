@@ -1,20 +1,17 @@
 package com.sup2i.food.catalog.api;
 
-import com.sup2i.food.catalog.api.dto.CreateProductOptionComponentRequest;
-import com.sup2i.food.catalog.api.dto.ProductOptionComponentResponse;
-import com.sup2i.food.catalog.service.CatalogOptionComponentService;
+import com.sup2i.food.catalog.api.dto.ProductSubstitutionResponse;
+import com.sup2i.food.catalog.api.dto.UpsertProductSubstitutionRequest;
+import com.sup2i.food.catalog.service.CatalogSubstitutionService;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -24,83 +21,57 @@ import java.util.UUID;
 @RequestMapping(
     "/api/v1/admin/products"
 )
-public class AdminProductOptionComponentController {
+public class AdminProductSubstitutionController {
 
-    private final CatalogOptionComponentService service;
+    private final CatalogSubstitutionService service;
 
-    public AdminProductOptionComponentController(
-        CatalogOptionComponentService service
+    public AdminProductSubstitutionController(
+        CatalogSubstitutionService service
     ) {
         this.service = service;
     }
 
-    @PostMapping(
-        "/{productId}/options/{optionId}/components"
+    @PutMapping(
+        "/{productId}/substitutions/{substituteProductId}"
     )
-    @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize(
         "hasAuthority('product.write')"
     )
-    public ProductOptionComponentResponse create(
+    public ProductSubstitutionResponse upsert(
         @PathVariable UUID productId,
-        @PathVariable UUID optionId,
+        @PathVariable UUID substituteProductId,
         @Valid
         @RequestBody
-        CreateProductOptionComponentRequest request,
+        UpsertProductSubstitutionRequest request,
         JwtAuthenticationToken authentication
     ) {
 
-        return service.create(
+        return service.upsert(
             userId(authentication),
             productId,
-            optionId,
+            substituteProductId,
             request
         );
     }
 
     @GetMapping(
-        "/{productId}/options/{optionId}/components"
+        "/{productId}/substitutions"
     )
     @PreAuthorize(
         "hasAuthority('product.write')"
     )
-    public List<ProductOptionComponentResponse>
+    public List<ProductSubstitutionResponse>
         findAll(
             @PathVariable UUID productId,
-            @PathVariable UUID optionId,
             JwtAuthenticationToken authentication
         ) {
 
-        return service.findAll(
+        return service.adminFindAll(
             userId(authentication),
-            productId,
-            optionId
+            productId
         );
     }
 
-    @DeleteMapping(
-        "/{productId}/options/{optionId}/components/{componentId}"
-    )
-    @ResponseStatus(
-        HttpStatus.NO_CONTENT
-    )
-    @PreAuthorize(
-        "hasAuthority('product.write')"
-    )
-    public void delete(
-        @PathVariable UUID productId,
-        @PathVariable UUID optionId,
-        @PathVariable UUID componentId,
-        JwtAuthenticationToken authentication
-    ) {
-
-        service.delete(
-            userId(authentication),
-            productId,
-            optionId,
-            componentId
-        );
-    }
     private UUID userId(
         JwtAuthenticationToken authentication
     ) {

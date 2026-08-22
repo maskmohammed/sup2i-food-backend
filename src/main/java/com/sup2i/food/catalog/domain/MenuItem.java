@@ -133,4 +133,22 @@ public class MenuItem {
     public int getDisplayOrder() {
         return displayOrder;
     }
+
+    public void update(
+        Product product,
+        ProductVariant variant,
+        BigDecimal quantity,
+        BigDecimal priceDelta,
+        boolean defaultItem,
+        boolean active,
+        int displayOrder
+    ) {
+        this.product = product;
+        this.variant = variant;
+        this.quantity = quantity;
+        this.priceDelta = priceDelta;
+        this.defaultItem = defaultItem;
+        this.active = active;
+        this.displayOrder = displayOrder;
+    }
 }

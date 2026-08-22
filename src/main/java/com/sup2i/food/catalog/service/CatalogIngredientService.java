@@ -4,6 +4,7 @@ import com.sup2i.food.catalog.api.dto.CreateIngredientRequest;
 import com.sup2i.food.catalog.api.dto.DietaryReferenceResponse;
 import com.sup2i.food.catalog.api.dto.IngredientResponse;
 import com.sup2i.food.catalog.api.dto.ReplaceIngredientAllergensRequest;
+import com.sup2i.food.catalog.api.dto.UpdateIngredientRequest;
 import com.sup2i.food.catalog.domain.Allergen;
 import com.sup2i.food.catalog.domain.Ingredient;
 import com.sup2i.food.catalog.domain.IngredientAllergen;
@@ -141,6 +142,66 @@ public class CatalogIngredientService {
         return response(ingredient);
     }
 
+    @Transactional
+    public IngredientResponse update(
+        UUID actorId,
+        UUID ingredientId,
+        UpdateIngredientRequest request
+    ) {
+
+        User actor =
+            authenticatedUser(actorId);
+
+        UUID organizationId =
+            actor.getOrganization().getId();
+
+        Ingredient ingredient =
+            ingredientForOrganization(
+                ingredientId,
+                organizationId
+            );
+
+        String code =
+            normalizeCode(
+                request.code()
+            );
+
+        if (
+            !ingredient.getCode().equals(code)
+            && ingredientRepository
+                .existsByOrganization_IdAndCode(
+                    organizationId,
+                    code
+                )
+        ) {
+            throw new CatalogConflictException(
+                "Ingredient code already exists."
+            );
+        }
+
+        ingredient.update(
+            code,
+            request.name().trim(),
+            request.baseUnit(),
+            request.active()
+        );
+
+        try {
+            ingredient =
+                ingredientRepository
+                    .saveAndFlush(
+                        ingredient
+                    );
+        } catch (
+            DataIntegrityViolationException exception
+        ) {
+            throw new CatalogConflictException(
+                "Ingredient conflicts with an existing resource."
+            );
+        }
+
+        return response(ingredient);
+    }
     @Transactional
     public IngredientResponse replaceAllergens(
         UUID actorId,

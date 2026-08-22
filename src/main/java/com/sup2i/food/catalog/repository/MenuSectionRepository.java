@@ -11,6 +11,11 @@ public interface MenuSectionRepository
     extends JpaRepository<MenuSection, UUID> {
 
     List<MenuSection>
+        findAllByMenu_IdOrderByDisplayOrderAscNameAsc(
+            UUID menuId
+        );
+
+    List<MenuSection>
         findAllByMenu_IdAndActiveTrueOrderByDisplayOrderAscNameAsc(
             UUID menuId
         );

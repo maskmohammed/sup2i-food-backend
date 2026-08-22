@@ -6,6 +6,8 @@ import com.sup2i.food.catalog.api.dto.MenuItemResponse;
 import com.sup2i.food.catalog.api.dto.MenuResponse;
 import com.sup2i.food.catalog.api.dto.MenuSectionResponse;
 import com.sup2i.food.catalog.api.dto.UpsertMenuRequest;
+import com.sup2i.food.catalog.api.dto.UpdateMenuItemRequest;
+import com.sup2i.food.catalog.api.dto.UpdateMenuSectionRequest;
 import com.sup2i.food.catalog.service.CatalogMenuService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -103,6 +105,53 @@ public class AdminMenuController {
         );
     }
 
+    @PutMapping(
+        "/{productId}/menu/sections/{sectionId}"
+    )
+    @PreAuthorize(
+        "hasAuthority('product.write')"
+    )
+    public MenuSectionResponse updateSection(
+        @PathVariable UUID productId,
+        @PathVariable UUID sectionId,
+        @Valid
+        @RequestBody
+        UpdateMenuSectionRequest request,
+        JwtAuthenticationToken authentication
+    ) {
+
+        return service.updateSection(
+            userId(authentication),
+            productId,
+            sectionId,
+            request
+        );
+    }
+
+    @PutMapping(
+        "/{productId}/menu/sections/{sectionId}/items/{itemId}"
+    )
+    @PreAuthorize(
+        "hasAuthority('product.write')"
+    )
+    public MenuItemResponse updateItem(
+        @PathVariable UUID productId,
+        @PathVariable UUID sectionId,
+        @PathVariable UUID itemId,
+        @Valid
+        @RequestBody
+        UpdateMenuItemRequest request,
+        JwtAuthenticationToken authentication
+    ) {
+
+        return service.updateItem(
+            userId(authentication),
+            productId,
+            sectionId,
+            itemId,
+            request
+        );
+    }
     private UUID userId(
         JwtAuthenticationToken authentication
     ) {

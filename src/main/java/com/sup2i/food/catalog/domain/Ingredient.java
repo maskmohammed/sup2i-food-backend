@@ -130,6 +130,18 @@ public class Ingredient {
         return active;
     }
 
+    public void update(
+        String code,
+        String name,
+        MeasurementUnit baseUnit,
+        boolean active
+    ) {
+        this.code = code;
+        this.name = name;
+        this.baseUnit = baseUnit;
+        this.active = active;
+    }
+
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }

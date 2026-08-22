@@ -116,4 +116,20 @@ public class MenuSection {
     public boolean isActive() {
         return active;
     }
+
+    public void update(
+        String code,
+        String name,
+        int minSelect,
+        int maxSelect,
+        int displayOrder,
+        boolean active
+    ) {
+        this.code = code;
+        this.name = name;
+        this.minSelect = minSelect;
+        this.maxSelect = maxSelect;
+        this.displayOrder = displayOrder;
+        this.active = active;
+    }
 }

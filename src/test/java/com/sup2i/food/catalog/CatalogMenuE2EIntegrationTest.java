@@ -1009,6 +1009,1107 @@ class CatalogMenuE2EIntegrationTest {
     }
 
     // =========================================================
+    // ADMIN LIFECYCLE
+    // =========================================================
+
+    @Test
+    void upsertMenuReturnsExistingSectionsAndItems()
+        throws Exception {
+
+        UUID menuProductId =
+            insertOwnedMenuProduct(
+                "MENU-UPSERT-TREE"
+            );
+
+        UUID menuId =
+            insertMenu(
+                menuProductId,
+                "FIXED",
+                true
+            );
+
+        UUID sectionId =
+            insertMenuSection(
+                menuId,
+                "MAIN",
+                "Main",
+                1,
+                1,
+                0,
+                true
+            );
+
+        UUID itemProductId =
+            insertOwnedProduct(
+                "UPSERT-TREE-ITEM",
+                "Existing Item"
+            );
+
+        insertMenuItem(
+            sectionId,
+            itemProductId,
+            null,
+            0,
+            true
+        );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu",
+                    menuProductId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "pricingMode": "CALCULATED",
+                          "description": "Updated tree",
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.pricingMode")
+                    .value("CALCULATED")
+            )
+            .andExpect(
+                jsonPath("$.sections.length()")
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath("$.sections[0].id")
+                    .value(sectionId.toString())
+            )
+            .andExpect(
+                jsonPath("$.sections[0].items.length()")
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath("$.sections[0].items[0].productId")
+                    .value(itemProductId.toString())
+            );
+    }
+
+    @Test
+    void updateSectionChangesFieldsAndCanDeactivate()
+        throws Exception {
+
+        UUID menuProductId =
+            insertOwnedMenuProduct(
+                "MENU-SECTION-UPDATE"
+            );
+
+        UUID menuId =
+            insertMenu(
+                menuProductId,
+                "FIXED",
+                true
+            );
+
+        UUID sectionId =
+            insertMenuSection(
+                menuId,
+                "OLD",
+                "Old Section",
+                1,
+                1,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}",
+                    menuProductId,
+                    sectionId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "  UPDATED  ",
+                          "name": "  Updated Section  ",
+                          "minSelect": 0,
+                          "maxSelect": 2,
+                          "displayOrder": 5,
+                          "active": false
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("UPDATED")
+            )
+            .andExpect(
+                jsonPath("$.name")
+                    .value("Updated Section")
+            )
+            .andExpect(
+                jsonPath("$.minSelect")
+                    .value(0)
+            )
+            .andExpect(
+                jsonPath("$.maxSelect")
+                    .value(2)
+            )
+            .andExpect(
+                jsonPath("$.displayOrder")
+                    .value(5)
+            )
+            .andExpect(
+                jsonPath("$.active")
+                    .value(false)
+            );
+
+        Boolean active =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT is_active
+                FROM menu_sections
+                WHERE id = ?
+                """,
+                Boolean.class,
+                sectionId
+            );
+
+        assertThat(active)
+            .isFalse();
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/menu",
+                    menuProductId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.sections.length()")
+                    .value(0)
+            );
+    }
+
+    @Test
+    void updateSectionCannotCrossMenuBoundary()
+        throws Exception {
+
+        UUID productA =
+            insertOwnedMenuProduct(
+                "MENU-SECTION-A"
+            );
+
+        UUID productB =
+            insertOwnedMenuProduct(
+                "MENU-SECTION-B"
+            );
+
+        insertMenu(
+            productA,
+            "FIXED",
+            true
+        );
+
+        UUID menuB =
+            insertMenu(
+                productB,
+                "FIXED",
+                true
+            );
+
+        UUID sectionB =
+            insertMenuSection(
+                menuB,
+                "FOREIGN",
+                "Foreign Section",
+                0,
+                1,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}",
+                    productA,
+                    sectionB
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "X",
+                          "name": "Wrong",
+                          "minSelect": 0,
+                          "maxSelect": 1,
+                          "displayOrder": 0,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+    }
+
+    @Test
+    void updateItemChangesRelationshipAndCanDeactivate()
+        throws Exception {
+
+        UUID menuProductId =
+            insertOwnedMenuProduct(
+                "MENU-ITEM-UPDATE"
+            );
+
+        UUID menuId =
+            insertMenu(
+                menuProductId,
+                "FIXED",
+                true
+            );
+
+        UUID sectionId =
+            insertMenuSection(
+                menuId,
+                "MAIN",
+                "Main",
+                0,
+                2,
+                0,
+                true
+            );
+
+        UUID oldProduct =
+            insertOwnedProduct(
+                "ITEM-OLD",
+                "Old Item"
+            );
+
+        UUID newProduct =
+            insertOwnedProduct(
+                "ITEM-NEW",
+                "New Item"
+            );
+
+        UUID newVariant =
+            insertVariant(
+                newProduct,
+                "Large",
+                true
+            );
+
+        UUID itemId =
+            insertMenuItem(
+                sectionId,
+                oldProduct,
+                null,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}/items/{itemId}",
+                    menuProductId,
+                    sectionId,
+                    itemId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "productId": "%s",
+                          "variantId": "%s",
+                          "quantity": 2.500,
+                          "priceDelta": 1.25,
+                          "defaultItem": true,
+                          "active": false,
+                          "displayOrder": 4
+                        }
+                        """.formatted(
+                            newProduct,
+                            newVariant
+                        )
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.productId")
+                    .value(newProduct.toString())
+            )
+            .andExpect(
+                jsonPath("$.variantId")
+                    .value(newVariant.toString())
+            )
+            .andExpect(
+                jsonPath("$.quantity")
+                    .value(2.5)
+            )
+            .andExpect(
+                jsonPath("$.priceDelta")
+                    .value(1.25)
+            )
+            .andExpect(
+                jsonPath("$.defaultItem")
+                    .value(true)
+            )
+            .andExpect(
+                jsonPath("$.active")
+                    .value(false)
+            )
+            .andExpect(
+                jsonPath("$.displayOrder")
+                    .value(4)
+            );
+
+        Boolean active =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT is_active
+                FROM menu_items
+                WHERE id = ?
+                """,
+                Boolean.class,
+                itemId
+            );
+
+        assertThat(active)
+            .isFalse();
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/menu",
+                    menuProductId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.sections[0].items.length()")
+                    .value(0)
+            );
+    }
+
+    @Test
+    void updateItemCannotCrossSectionBoundary()
+        throws Exception {
+
+        UUID menuProductId =
+            insertOwnedMenuProduct(
+                "MENU-ITEM-BOUNDARY"
+            );
+
+        UUID menuId =
+            insertMenu(
+                menuProductId,
+                "FIXED",
+                true
+            );
+
+        UUID sectionA =
+            insertMenuSection(
+                menuId,
+                "A",
+                "Section A",
+                0,
+                1,
+                0,
+                true
+            );
+
+        UUID sectionB =
+            insertMenuSection(
+                menuId,
+                "B",
+                "Section B",
+                0,
+                1,
+                1,
+                true
+            );
+
+        UUID itemProduct =
+            insertOwnedProduct(
+                "BOUNDARY-ITEM",
+                "Boundary Item"
+            );
+
+        UUID itemB =
+            insertMenuItem(
+                sectionB,
+                itemProduct,
+                null,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}/items/{itemId}",
+                    menuProductId,
+                    sectionA,
+                    itemB
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "productId": "%s",
+                          "quantity": 1,
+                          "priceDelta": 0,
+                          "defaultItem": false,
+                          "active": true,
+                          "displayOrder": 0
+                        }
+                        """.formatted(
+                            itemProduct
+                        )
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+    }
+
+    @Test
+    void menuLifecycleUpdateRequiresProductWritePermission()
+        throws Exception {
+
+        UUID menuProductId =
+            insertOwnedMenuProduct(
+                "MENU-LIFECYCLE-RBAC"
+            );
+
+        UUID menuId =
+            insertMenu(
+                menuProductId,
+                "FIXED",
+                true
+            );
+
+        UUID sectionId =
+            insertMenuSection(
+                menuId,
+                "RBAC",
+                "RBAC Section",
+                0,
+                1,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}",
+                    menuProductId,
+                    sectionId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "RBAC",
+                          "name": "RBAC Section",
+                          "minSelect": 0,
+                          "maxSelect": 1,
+                          "displayOrder": 0,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isForbidden()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PERMISSION_DENIED")
+            );
+    }
+    // =========================================================
+    // PRODUCT SUBSTITUTIONS
+    // =========================================================
+
+    @Test
+    void upsertSubstitutionCreatesThenUpdatesSingleRow()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-SOURCE",
+                "Source Product"
+            );
+
+        UUID substituteId =
+            insertOwnedProduct(
+                "SUB-TARGET",
+                "Target Product"
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/substitutions/{substituteProductId}",
+                    productId,
+                    substituteId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "priority": 2,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.productId")
+                    .value(productId.toString())
+            )
+            .andExpect(
+                jsonPath("$.substituteProductId")
+                    .value(substituteId.toString())
+            )
+            .andExpect(
+                jsonPath("$.priority")
+                    .value(2)
+            )
+            .andExpect(
+                jsonPath("$.active")
+                    .value(true)
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/substitutions/{substituteProductId}",
+                    productId,
+                    substituteId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "priority": 5,
+                          "active": false
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.priority")
+                    .value(5)
+            )
+            .andExpect(
+                jsonPath("$.active")
+                    .value(false)
+            );
+
+        Long count =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM product_substitutions
+                WHERE product_id = ?
+                  AND substitute_product_id = ?
+                """,
+                Long.class,
+                productId,
+                substituteId
+            );
+
+        assertThat(count)
+            .isEqualTo(1L);
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/admin/products/{productId}/substitutions",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.length()")
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath("$[0].active")
+                    .value(false)
+            );
+    }
+
+    @Test
+    void productCannotSubstituteItself()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-SELF",
+                "Self Product"
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/substitutions/{substituteProductId}",
+                    productId,
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "priority": 0,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+    }
+
+    @Test
+    void foreignSubstituteProductIsRejected()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-LOCAL",
+                "Local Product"
+            );
+
+        UUID otherOrganization =
+            insertOrganization(
+                "SUB-FOREIGN"
+            );
+
+        UUID foreignCategory =
+            insertCategory(
+                otherOrganization,
+                "Foreign Substitution Category",
+                true
+            );
+
+        UUID foreignProduct =
+            insertProduct(
+                otherOrganization,
+                foreignCategory,
+                "SUB-FOREIGN",
+                "Foreign Substitute",
+                true,
+                "PACKAGED"
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/substitutions/{substituteProductId}",
+                    productId,
+                    foreignProduct
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "priority": 0,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+    }
+
+    @Test
+    void substitutionWriteRequiresProductWritePermission()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-RBAC-SOURCE",
+                "RBAC Source"
+            );
+
+        UUID substituteId =
+            insertOwnedProduct(
+                "SUB-RBAC-TARGET",
+                "RBAC Target"
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/substitutions/{substituteProductId}",
+                    productId,
+                    substituteId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "priority": 0,
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isForbidden()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PERMISSION_DENIED")
+            );
+    }
+
+    @Test
+    void substitutionReadRequiresCatalogReadPermission()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-READ-SOURCE",
+                "Read Source"
+            );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/substitutions",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+            )
+            .andExpect(
+                status().isForbidden()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PERMISSION_DENIED")
+            );
+    }
+
+    @Test
+    void catalogSubstitutionsFilterUnavailableAndOrderByPriority()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-CATALOG-SOURCE",
+                "Catalog Source"
+            );
+
+        UUID first =
+            insertOwnedProduct(
+                "SUB-FIRST",
+                "Alpha Substitute"
+            );
+
+        UUID second =
+            insertOwnedProduct(
+                "SUB-SECOND",
+                "Beta Substitute"
+            );
+
+        UUID inactiveLink =
+            insertOwnedProduct(
+                "SUB-INACTIVE-LINK",
+                "Inactive Link"
+            );
+
+        UUID inactiveProduct =
+            insertOwnedProduct(
+                "SUB-INACTIVE-PRODUCT",
+                "Inactive Product"
+            );
+
+        UUID inactiveCategoryProduct =
+            insertOwnedProduct(
+                "SUB-INACTIVE-CATEGORY",
+                "Inactive Category Product"
+            );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO product_substitutions (
+                product_id,
+                substitute_product_id,
+                priority,
+                is_active
+            )
+            VALUES (?, ?, 1, TRUE)
+            """,
+            productId,
+            first
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO product_substitutions (
+                product_id,
+                substitute_product_id,
+                priority,
+                is_active
+            )
+            VALUES (?, ?, 2, TRUE)
+            """,
+            productId,
+            second
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO product_substitutions (
+                product_id,
+                substitute_product_id,
+                priority,
+                is_active
+            )
+            VALUES (?, ?, 0, FALSE)
+            """,
+            productId,
+            inactiveLink
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO product_substitutions (
+                product_id,
+                substitute_product_id,
+                priority,
+                is_active
+            )
+            VALUES (?, ?, 0, TRUE)
+            """,
+            productId,
+            inactiveProduct
+        );
+
+        jdbcTemplate.update(
+            """
+            UPDATE products
+            SET is_active = FALSE
+            WHERE id = ?
+            """,
+            inactiveProduct
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO product_substitutions (
+                product_id,
+                substitute_product_id,
+                priority,
+                is_active
+            )
+            VALUES (?, ?, 0, TRUE)
+            """,
+            productId,
+            inactiveCategoryProduct
+        );
+
+        jdbcTemplate.update(
+            """
+            UPDATE categories
+            SET is_active = FALSE
+            WHERE id = (
+                SELECT category_id
+                FROM products
+                WHERE id = ?
+            )
+            """,
+            inactiveCategoryProduct
+        );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/substitutions",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.length()")
+                    .value(2)
+            )
+            .andExpect(
+                jsonPath("$[0].substituteProductId")
+                    .value(first.toString())
+            )
+            .andExpect(
+                jsonPath("$[0].priority")
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath("$[1].substituteProductId")
+                    .value(second.toString())
+            )
+            .andExpect(
+                jsonPath("$[1].priority")
+                    .value(2)
+            );
+    }
+
+    @Test
+    void inactiveSourceProductSubstitutionsReturnProductUnavailable()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "SUB-INACTIVE-SOURCE",
+                "Inactive Source"
+            );
+
+        jdbcTemplate.update(
+            """
+            UPDATE products
+            SET is_active = FALSE
+            WHERE id = ?
+            """,
+            productId
+        );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/catalog/products/{productId}/substitutions",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isUnprocessableContent()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PRODUCT_UNAVAILABLE")
+            );
+    }
+    // =========================================================
     // V052 DATABASE INVARIANT
     // =========================================================
 

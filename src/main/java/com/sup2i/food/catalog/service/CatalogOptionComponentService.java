@@ -190,6 +190,46 @@ public class CatalogOptionComponentService {
             .toList();
     }
 
+    @Transactional
+    public void delete(
+        UUID actorId,
+        UUID productId,
+        UUID optionId,
+        UUID componentId
+    ) {
+
+        User actor =
+            authenticatedUser(actorId);
+
+        productForOrganization(
+            productId,
+            actor.getOrganization().getId()
+        );
+
+        ProductOption option =
+            optionForProduct(
+                optionId,
+                productId
+            );
+
+        ProductOptionComponent component =
+            componentRepository
+                .findByIdAndProductOption_Id(
+                    componentId,
+                    option.getId()
+                )
+                .orElseThrow(() ->
+                    new CatalogNotFoundException(
+                        "Product option component does not exist."
+                    )
+                );
+
+        componentRepository.delete(
+            component
+        );
+
+        componentRepository.flush();
+    }
     private ProductOption optionForProduct(
         UUID optionId,
         UUID productId

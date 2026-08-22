@@ -35,6 +35,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -765,6 +766,269 @@ class CatalogRecipeE2EIntegrationTest {
             .isZero();
     }
 
+    // =========================================================
+    // INGREDIENT LIFECYCLE
+    // =========================================================
+
+    @Test
+    void updateIngredientNormalizesAndDeactivates()
+        throws Exception {
+
+        UUID ingredientId =
+            insertOwnedIngredient(
+                "UPDATE-ING",
+                "GRAM",
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/ingredients/{ingredientId}",
+                    ingredientId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "  fresh-code  ",
+                          "name": "  Renamed Ingredient  ",
+                          "baseUnit": "KILOGRAM",
+                          "active": false
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("FRESH-CODE")
+            )
+            .andExpect(
+                jsonPath("$.name")
+                    .value("Renamed Ingredient")
+            )
+            .andExpect(
+                jsonPath("$.baseUnit")
+                    .value("KILOGRAM")
+            )
+            .andExpect(
+                jsonPath("$.active")
+                    .value(false)
+            );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/admin/ingredients/{ingredientId}",
+                    ingredientId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.active")
+                    .value(false)
+            );
+
+        String listBody =
+            mockMvc.perform(
+                    get(
+                        "/api/v1/admin/ingredients"
+                    )
+                        .header(
+                            "Authorization",
+                            bearer("product.write")
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(listBody)
+            .doesNotContain(
+                ingredientId.toString()
+            );
+    }
+
+    @Test
+    void updateIngredientDuplicateCodeReturnsConflict()
+        throws Exception {
+
+        UUID first =
+            insertOwnedIngredient(
+                "UPDATE-DUP-A",
+                "GRAM",
+                true
+            );
+
+        UUID second =
+            insertOwnedIngredient(
+                "UPDATE-DUP-B",
+                "GRAM",
+                true
+            );
+
+        jdbcTemplate.update(
+            """
+            UPDATE ingredients
+            SET code = UPPER(code)
+            WHERE id = ?
+            """,
+            first
+        );
+
+        String firstCode =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT code
+                FROM ingredients
+                WHERE id = ?
+                """,
+                String.class,
+                first
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/ingredients/{ingredientId}",
+                    second
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "%s",
+                          "name": "Duplicate Code",
+                          "baseUnit": "GRAM",
+                          "active": true
+                        }
+                        """.formatted(
+                            firstCode
+                        )
+                    )
+            )
+            .andExpect(
+                status().isConflict()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("CONFLICT")
+            );
+    }
+
+    @Test
+    void updateIngredientCannotCrossTenantBoundary()
+        throws Exception {
+
+        UUID otherOrganization =
+            insertOrganization(
+                "UPDATE-FOREIGN"
+            );
+
+        UUID foreignIngredient =
+            insertIngredient(
+                otherOrganization,
+                "FOREIGN-UPDATE",
+                "Foreign Update",
+                "GRAM",
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/ingredients/{ingredientId}",
+                    foreignIngredient
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "FOREIGN",
+                          "name": "Foreign",
+                          "baseUnit": "GRAM",
+                          "active": false
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+    }
+
+    @Test
+    void updateIngredientRequiresProductWritePermission()
+        throws Exception {
+
+        UUID ingredientId =
+            insertOwnedIngredient(
+                "UPDATE-RBAC",
+                "GRAM",
+                true
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/ingredients/{ingredientId}",
+                    ingredientId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "code": "UPDATE-RBAC",
+                          "name": "RBAC",
+                          "baseUnit": "GRAM",
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isForbidden()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PERMISSION_DENIED")
+            );
+    }
     // =========================================================
     // RECIPES / BOM
     // =========================================================
@@ -2172,6 +2436,316 @@ class CatalogRecipeE2EIntegrationTest {
             );
     }
 
+    // =========================================================
+    // OPTION COMPONENT LIFECYCLE
+    // =========================================================
+
+    @Test
+    void deleteOptionComponentRemovesRow()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedPackagedProduct(
+                "DELETE-COMP-HOST"
+            );
+
+        UUID optionId =
+            insertOption(
+                productId,
+                "Delete Component"
+            );
+
+        UUID componentProduct =
+            insertOwnedPackagedProduct(
+                "DELETE-COMP-P"
+            );
+
+        postComponent(
+            productId,
+            optionId,
+            """
+            {
+              "componentProductId": "%s"
+            }
+            """.formatted(
+                componentProduct
+            )
+        );
+
+        UUID componentId =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM product_option_components
+                WHERE product_option_id = ?
+                """,
+                UUID.class,
+                optionId
+            );
+
+        mockMvc.perform(
+                delete(
+                    "/api/v1/admin/products/{productId}/options/{optionId}/components/{componentId}",
+                    productId,
+                    optionId,
+                    componentId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+            )
+            .andExpect(
+                status().isNoContent()
+            );
+
+        Long count =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM product_option_components
+                WHERE id = ?
+                """,
+                Long.class,
+                componentId
+            );
+
+        assertThat(count)
+            .isZero();
+    }
+
+    @Test
+    void deleteOptionComponentMustBelongToSelectedOption()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedPackagedProduct(
+                "DELETE-OPTION-HOST"
+            );
+
+        UUID optionA =
+            insertOption(
+                productId,
+                "Delete Option A"
+            );
+
+        UUID optionB =
+            insertOption(
+                productId,
+                "Delete Option B"
+            );
+
+        UUID componentProduct =
+            insertOwnedPackagedProduct(
+                "DELETE-OPTION-COMP"
+            );
+
+        postComponent(
+            productId,
+            optionB,
+            """
+            {
+              "componentProductId": "%s"
+            }
+            """.formatted(
+                componentProduct
+            )
+        );
+
+        UUID componentId =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM product_option_components
+                WHERE product_option_id = ?
+                """,
+                UUID.class,
+                optionB
+            );
+
+        mockMvc.perform(
+                delete(
+                    "/api/v1/admin/products/{productId}/options/{optionId}/components/{componentId}",
+                    productId,
+                    optionA,
+                    componentId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+
+        Long count =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM product_option_components
+                WHERE id = ?
+                """,
+                Long.class,
+                componentId
+            );
+
+        assertThat(count)
+            .isEqualTo(1L);
+    }
+
+    @Test
+    void deleteOptionComponentRequiresProductWritePermission()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedPackagedProduct(
+                "DELETE-RBAC-HOST"
+            );
+
+        UUID optionId =
+            insertOption(
+                productId,
+                "Delete RBAC"
+            );
+
+        UUID componentProduct =
+            insertOwnedPackagedProduct(
+                "DELETE-RBAC-COMP"
+            );
+
+        postComponent(
+            productId,
+            optionId,
+            """
+            {
+              "componentProductId": "%s"
+            }
+            """.formatted(
+                componentProduct
+            )
+        );
+
+        UUID componentId =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM product_option_components
+                WHERE product_option_id = ?
+                """,
+                UUID.class,
+                optionId
+            );
+
+        mockMvc.perform(
+                delete(
+                    "/api/v1/admin/products/{productId}/options/{optionId}/components/{componentId}",
+                    productId,
+                    optionId,
+                    componentId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("catalog.read")
+                    )
+            )
+            .andExpect(
+                status().isForbidden()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("PERMISSION_DENIED")
+            );
+    }
+
+    @Test
+    void deleteOptionComponentCannotCrossTenantBoundary()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedPackagedProduct(
+                "DELETE-TENANT-HOST"
+            );
+
+        UUID optionId =
+            insertOption(
+                productId,
+                "Delete Tenant"
+            );
+
+        UUID componentProduct =
+            insertOwnedPackagedProduct(
+                "DELETE-TENANT-COMP"
+            );
+
+        postComponent(
+            productId,
+            optionId,
+            """
+            {
+              "componentProductId": "%s"
+            }
+            """.formatted(
+                componentProduct
+            )
+        );
+
+        UUID componentId =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM product_option_components
+                WHERE product_option_id = ?
+                """,
+                UUID.class,
+                optionId
+            );
+
+        UUID otherOrganization =
+            insertOrganization(
+                "DELETE-OTHER"
+            );
+
+        UUID otherCategory =
+            insertCategory(
+                otherOrganization,
+                "Delete Other Category"
+            );
+
+        UUID foreignProduct =
+            insertProduct(
+                otherOrganization,
+                otherCategory,
+                "DELETE-FOREIGN",
+                "Delete Foreign Product",
+                "PACKAGED",
+                true
+            );
+
+        mockMvc.perform(
+                delete(
+                    "/api/v1/admin/products/{productId}/options/{optionId}/components/{componentId}",
+                    foreignProduct,
+                    optionId,
+                    componentId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("NOT_FOUND")
+            );
+    }
     // =========================================================
     // HTTP HELPERS
     // =========================================================

@@ -6,6 +6,8 @@ import com.sup2i.food.catalog.api.dto.MenuItemResponse;
 import com.sup2i.food.catalog.api.dto.MenuResponse;
 import com.sup2i.food.catalog.api.dto.MenuSectionResponse;
 import com.sup2i.food.catalog.api.dto.UpsertMenuRequest;
+import com.sup2i.food.catalog.api.dto.UpdateMenuItemRequest;
+import com.sup2i.food.catalog.api.dto.UpdateMenuSectionRequest;
 import com.sup2i.food.catalog.domain.Menu;
 import com.sup2i.food.catalog.domain.MenuItem;
 import com.sup2i.food.catalog.domain.MenuPricingMode;
@@ -114,13 +116,8 @@ public class CatalogMenuService {
             );
         }
 
-        return new MenuResponse(
-            menu.getId(),
-            productId,
-            menu.getPricingMode(),
-            menu.getDescription(),
-            menu.isActive(),
-            List.of()
+        return adminMenuResponse(
+            menu
         );
     }
 
@@ -285,6 +282,183 @@ public class CatalogMenuService {
         return toItemResponse(item);
     }
 
+    @Transactional
+    public MenuSectionResponse updateSection(
+        UUID actorId,
+        UUID productId,
+        UUID sectionId,
+        UpdateMenuSectionRequest request
+    ) {
+
+        User actor =
+            authenticatedUser(actorId);
+
+        Product product =
+            productForOrganization(
+                productId,
+                actor.getOrganization().getId()
+            );
+
+        Menu menu =
+            menuForProduct(
+                product.getId()
+            );
+
+        MenuSection section =
+            sectionRepository
+                .findByIdAndMenu_Id(
+                    sectionId,
+                    menu.getId()
+                )
+                .orElseThrow(() ->
+                    new CatalogNotFoundException(
+                        "Menu section does not exist."
+                    )
+                );
+
+        int minSelect =
+            request.minSelect() == null
+                ? section.getMinSelect()
+                : request.minSelect();
+
+        int maxSelect =
+            request.maxSelect() == null
+                ? section.getMaxSelect()
+                : request.maxSelect();
+
+        if (minSelect > maxSelect) {
+            throw new com.sup2i.food.catalog.exception.CatalogValidationException(
+                "minSelect must be less than or equal to maxSelect"
+            );
+        }
+
+        section.update(
+            normalizeNullableText(
+                request.code()
+            ),
+            request.name().trim(),
+            minSelect,
+            maxSelect,
+            request.displayOrder(),
+            request.active() == null
+                ? section.isActive()
+                : request.active()
+        );
+
+        try {
+            section =
+                sectionRepository
+                    .saveAndFlush(section);
+        } catch (
+            DataIntegrityViolationException exception
+        ) {
+            throw new CatalogConflictException(
+                "Menu section conflicts with an existing resource."
+            );
+        }
+
+        return toSectionResponse(
+            section,
+            true
+        );
+    }
+
+    @Transactional
+    public MenuItemResponse updateItem(
+        UUID actorId,
+        UUID productId,
+        UUID sectionId,
+        UUID itemId,
+        UpdateMenuItemRequest request
+    ) {
+
+        User actor =
+            authenticatedUser(actorId);
+
+        UUID organizationId =
+            actor.getOrganization().getId();
+
+        Product menuProduct =
+            productForOrganization(
+                productId,
+                organizationId
+            );
+
+        Menu menu =
+            menuForProduct(
+                menuProduct.getId()
+            );
+
+        MenuSection section =
+            sectionRepository
+                .findByIdAndMenu_Id(
+                    sectionId,
+                    menu.getId()
+                )
+                .orElseThrow(() ->
+                    new CatalogNotFoundException(
+                        "Menu section does not exist."
+                    )
+                );
+
+        MenuItem item =
+            itemRepository
+                .findByIdAndMenuSection_Id(
+                    itemId,
+                    section.getId()
+                )
+                .orElseThrow(() ->
+                    new CatalogNotFoundException(
+                        "Menu item does not exist."
+                    )
+                );
+
+        Product itemProduct =
+            productForOrganization(
+                request.productId(),
+                organizationId
+            );
+
+        ProductVariant variant = null;
+
+        if (request.variantId() != null) {
+            variant =
+                variantRepository
+                    .findByIdAndProduct_Id(
+                        request.variantId(),
+                        itemProduct.getId()
+                    )
+                    .orElseThrow(() ->
+                        new CatalogNotFoundException(
+                            "Variant does not belong to the selected product."
+                        )
+                    );
+        }
+
+        item.update(
+            itemProduct,
+            variant,
+            request.quantity(),
+            request.priceDelta(),
+            request.defaultItem(),
+            request.active(),
+            request.displayOrder()
+        );
+
+        try {
+            item =
+                itemRepository
+                    .saveAndFlush(item);
+        } catch (
+            DataIntegrityViolationException exception
+        ) {
+            throw new CatalogConflictException(
+                "Menu item conflicts with an existing resource."
+            );
+        }
+
+        return toItemResponse(item);
+    }
     @Transactional(readOnly = true)
     public MenuResponse menu(
         UUID userId,
@@ -417,6 +591,72 @@ public class CatalogMenuService {
         );
     }
 
+    private MenuResponse adminMenuResponse(
+        Menu menu
+    ) {
+
+        List<MenuSection> sections =
+            sectionRepository
+                .findAllByMenu_IdOrderByDisplayOrderAscNameAsc(
+                    menu.getId()
+                );
+
+        List<MenuSectionResponse> responses =
+            sections.stream()
+                .map(section ->
+                    toSectionResponse(
+                        section,
+                        true
+                    )
+                )
+                .toList();
+
+        return new MenuResponse(
+            menu.getId(),
+            menu.getProduct().getId(),
+            menu.getPricingMode(),
+            menu.getDescription(),
+            menu.isActive(),
+            responses
+        );
+    }
+
+    private MenuSectionResponse toSectionResponse(
+        MenuSection section,
+        boolean includeInactiveItems
+    ) {
+
+        List<MenuItemResponse> items =
+            (
+                includeInactiveItems
+                    ? itemRepository
+                        .findAllByMenuSection_IdInOrderByMenuSection_IdAscDisplayOrderAscProduct_NameAsc(
+                            List.of(
+                                section.getId()
+                            )
+                        )
+                    : itemRepository
+                        .findAllByMenuSection_IdInAndActiveTrueOrderByMenuSection_IdAscDisplayOrderAscProduct_NameAsc(
+                            List.of(
+                                section.getId()
+                            )
+                        )
+            )
+                .stream()
+                .map(this::toItemResponse)
+                .toList();
+
+        return new MenuSectionResponse(
+            section.getId(),
+            section.getCode(),
+            section.getName(),
+            section.getMinSelect(),
+            section.getMaxSelect(),
+            section.getDisplayOrder(),
+            section.isActive(),
+            items
+        );
+    }
     private User authenticatedUser(
         UUID userId
     ) {

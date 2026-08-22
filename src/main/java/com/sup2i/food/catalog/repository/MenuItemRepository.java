@@ -5,13 +5,25 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface MenuItemRepository
     extends JpaRepository<MenuItem, UUID> {
 
     List<MenuItem>
+        findAllByMenuSection_IdInOrderByMenuSection_IdAscDisplayOrderAscProduct_NameAsc(
+            Collection<UUID> sectionIds
+        );
+
+    List<MenuItem>
         findAllByMenuSection_IdInAndActiveTrueOrderByMenuSection_IdAscDisplayOrderAscProduct_NameAsc(
             Collection<UUID> sectionIds
+        );
+
+    Optional<MenuItem>
+        findByIdAndMenuSection_Id(
+            UUID id,
+            UUID menuSectionId
         );
 }

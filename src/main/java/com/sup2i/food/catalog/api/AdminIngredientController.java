@@ -3,6 +3,7 @@ package com.sup2i.food.catalog.api;
 import com.sup2i.food.catalog.api.dto.CreateIngredientRequest;
 import com.sup2i.food.catalog.api.dto.IngredientResponse;
 import com.sup2i.food.catalog.api.dto.ReplaceIngredientAllergensRequest;
+import com.sup2i.food.catalog.api.dto.UpdateIngredientRequest;
 import com.sup2i.food.catalog.service.CatalogIngredientService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -81,6 +82,26 @@ public class AdminIngredientController {
         );
     }
 
+    @PutMapping(
+        "/{ingredientId}"
+    )
+    @PreAuthorize(
+        "hasAuthority('product.write')"
+    )
+    public IngredientResponse update(
+        @PathVariable UUID ingredientId,
+        @Valid
+        @RequestBody
+        UpdateIngredientRequest request,
+        JwtAuthenticationToken authentication
+    ) {
+
+        return service.update(
+            userId(authentication),
+            ingredientId,
+            request
+        );
+    }
     @PutMapping(
         "/{ingredientId}/allergens"
     )

@@ -3,6 +3,7 @@ package com.sup2i.food.inventory.repository;
 import com.sup2i.food.inventory.domain.StockItem;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,4 +36,10 @@ public interface StockItemRepository
         UUID organizationId,
         UUID ingredientId
     );
+
+    List<StockItem>
+        findAllByIdInAndOrganization_Id(
+            Collection<UUID> ids,
+            UUID organizationId
+        );
 }

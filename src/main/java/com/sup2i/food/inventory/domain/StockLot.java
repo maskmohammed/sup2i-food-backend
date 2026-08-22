@@ -144,4 +144,33 @@ public class StockLot {
     public BigDecimal getUnitCost() {
         return unitCost;
     }
+
+    public void consume(
+        BigDecimal quantity
+    ) {
+
+        if (
+            quantity == null
+            || quantity.signum() <= 0
+        ) {
+            throw new IllegalArgumentException(
+                "Lot consumption must be positive."
+            );
+        }
+
+        if (
+            quantity.compareTo(
+                quantityRemaining
+            ) > 0
+        ) {
+            throw new IllegalArgumentException(
+                "Lot does not contain enough remaining quantity."
+            );
+        }
+
+        quantityRemaining =
+            quantityRemaining.subtract(
+                quantity
+            );
+    }
 }

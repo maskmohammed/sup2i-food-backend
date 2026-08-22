@@ -1,7 +1,9 @@
 package com.sup2i.food.inventory.repository;
 
 import com.sup2i.food.inventory.domain.StockLot;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -71,4 +73,31 @@ public interface StockLotRepository
         @Param("organizationId")
         UUID organizationId
     );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select l
+        from StockLot l
+        left join fetch l.supplier supplier
+        where l.stockItem.id = :stockItemId
+          and l.stockLocation.id = :stockLocationId
+          and l.quantityRemaining > 0
+        order by
+            case
+                when l.expiresAt is null
+                then 1
+                else 0
+            end asc,
+            l.expiresAt asc,
+            l.receivedAt asc,
+            l.id asc
+        """)
+    List<StockLot>
+        findTransferLotsForUpdate(
+            @Param("stockItemId")
+            UUID stockItemId,
+
+            @Param("stockLocationId")
+            UUID stockLocationId
+        );
 }

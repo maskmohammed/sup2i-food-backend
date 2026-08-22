@@ -92,4 +92,18 @@ public interface StockBalanceRepository
         @Param("stockLocationId")
         UUID stockLocationId
     );
+
+    @Query("""
+        select b
+        from StockBalance b
+        join fetch b.stockItem item
+        join fetch b.stockLocation location
+        where item.organization.id = :organizationId
+        order by item.id asc, location.id asc
+        """)
+    java.util.List<StockBalance>
+        findAllForAlertReconciliation(
+            @Param("organizationId")
+            UUID organizationId
+        );
 }

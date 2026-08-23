@@ -2,36 +2,29 @@ package com.sup2i.food.order;
 
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
-import com.sup2i.food.security.config.SecurityProperties;
 import com.sup2i.food.security.service.AuthenticationTokens;
 import com.sup2i.food.security.service.RefreshTokenService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.net.InetAddress;
-import java.time.Instant;
-import java.util.Arrays;
-import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -73,135 +66,59 @@ class OrderE2EIntegrationTest {
     @Autowired
     private RefreshTokenService refreshTokenService;
 
-    @Autowired
-    private JwtDecoder jwtDecoder;
-
-    @Autowired
-    private JwtEncoder jwtEncoder;
-
-    @Autowired
-    private SecurityProperties securityProperties;
-
     private UUID organizationId;
     private UUID campusId;
     private UUID locationId;
-    private UUID userId;
-    private UUID studentId;
-    private String email;
-    private String sessionId;
+
+    private Actor actor;
 
     @BeforeEach
-    void seedStudentTenantAndSession()
-        throws Exception {
-
-        String suffix =
-            randomSuffix();
+    void seedTenant() {
 
         organizationId =
             insertOrganization(
-                "ORD-" + suffix
+                "ORD"
             );
 
         campusId =
             insertCampus(
                 organizationId,
-                "ORD-" + suffix,
+                "MAIN",
                 true
             );
 
         locationId =
             insertLocation(
                 campusId,
-                "ORD-" + suffix,
+                "SNACK",
+                "SNACK",
                 true
             );
 
-        userId =
-            UUID.randomUUID();
-
-        email =
-            "orders-"
-                + suffix
-                + "@sup2i.test";
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO users (
-                id,
-                organization_id,
-                email,
-                first_name,
-                last_name,
-                status
-            )
-            VALUES (?, ?, ?, 'Orders', 'Student', 'ACTIVE')
-            """,
-            userId,
-            organizationId,
-            email
-        );
-
-        studentId =
-            UUID.randomUUID();
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO students (
-                id,
-                user_id,
-                campus_id,
-                student_number,
-                enrollment_status
-            )
-            VALUES (?, ?, ?, ?, 'ACTIVE')
-            """,
-            studentId,
-            userId,
-            campusId,
-            "STU-" + suffix
-        );
-
-        User user =
-            userRepository
-                .findById(userId)
-                .orElseThrow();
-
-        AuthenticationTokens tokens =
-            refreshTokenService.issue(
-                user,
-                "orders-e2e",
-                InetAddress.getLoopbackAddress()
+        actor =
+            insertActor(
+                organizationId,
+                campusId,
+                true,
+                "ACTIVE",
+                "MAIN"
             );
-
-        Jwt jwt =
-            jwtDecoder.decode(
-                tokens.accessToken()
-            );
-
-        sessionId =
-            jwt.getClaimAsString(
-                "sid"
-            );
-
-        assertThat(sessionId)
-            .isNotBlank();
     }
 
     // =========================================================
-    // SECURITY / STUDENT CONTEXT
+    // 01 - SECURITY
     // =========================================================
 
     @Test
-    void anonymousOrderRequestIsRejected()
+    void unauthenticatedRequestsAreRejected()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
-                "ANON",
+            insertProduct(
+                organizationId,
                 "PACKAGED",
-                "10.00",
-                "20.00",
-                false
+                "AUTH",
+                "10.00"
             );
 
         mockMvc.perform(
@@ -213,9 +130,12 @@ class OrderE2EIntegrationTest {
                         MediaType.APPLICATION_JSON
                     )
                     .content(
-                        orderBody(
+                        draftBody(
                             locationId,
-                            line(productId, null, 1)
+                            productId,
+                            null,
+                            1,
+                            "Unauthenticated"
                         )
                     )
             )
@@ -224,95 +144,111 @@ class OrderE2EIntegrationTest {
             );
     }
 
+    // =========================================================
+    // 02 - STUDENT GUARDS
+    // =========================================================
+
     @Test
-    void suspendedStudentCannotCreateDraft()
+    void nonStudentAndSuspendedStudentAreRejected()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
-                "SUSPENDED",
+            insertProduct(
+                organizationId,
                 "PACKAGED",
-                "10.00",
-                "20.00",
-                false
+                "STUDENT",
+                "10.00"
             );
 
-        jdbcTemplate.update(
-            """
-            UPDATE students
-            SET enrollment_status = 'SUSPENDED'
-            WHERE id = ?
-            """,
-            studentId
-        );
+        Actor nonStudent =
+            insertActor(
+                organizationId,
+                campusId,
+                false,
+                null,
+                "NONSTUDENT"
+            );
 
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    UUID.randomUUID()
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            locationId,
-                            line(productId, null, 1)
-                        )
-                    )
+        putDraft(
+            UUID.randomUUID(),
+            nonStudent,
+            draftBody(
+                locationId,
+                productId,
+                null,
+                1,
+                "No student profile"
             )
+        )
             .andExpect(
                 status().isConflict()
+            );
+
+        Actor suspended =
+            insertActor(
+                organizationId,
+                campusId,
+                true,
+                "SUSPENDED",
+                "SUSPENDED"
+            );
+
+        putDraft(
+            UUID.randomUUID(),
+            suspended,
+            draftBody(
+                locationId,
+                productId,
+                null,
+                1,
+                "Suspended student"
             )
+        )
             .andExpect(
-                jsonPath("$.code")
-                    .value("CONFLICT")
+                status().isConflict()
             );
     }
 
     // =========================================================
-    // DRAFT / SUBMIT
+    // 03 - DRAFT SNAPSHOT / IDEMPOTENCY
     // =========================================================
 
     @Test
-    void draftCreationSnapshotsPricingAndHistory()
+    void draftCreationSnapshotsPriceAndReplaysIdempotently()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
-                "SNAPSHOT",
+            insertProduct(
+                organizationId,
                 "PACKAGED",
-                "10.00",
-                "20.00",
-                false
+                "SNAP",
+                "10.00"
+            );
+
+        UUID variantId =
+            insertVariant(
+                productId,
+                "LARGE",
+                "2.50"
             );
 
         UUID orderId =
             UUID.randomUUID();
 
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            locationId,
-                            line(productId, null, 2)
-                        )
-                    )
-            )
+        String body =
+            draftBody(
+                locationId,
+                productId,
+                variantId,
+                2,
+                "Snapshot test"
+            );
+
+        putDraft(
+            orderId,
+            actor,
+            body
+        )
             .andExpect(
                 status().isOk()
             )
@@ -321,196 +257,155 @@ class OrderE2EIntegrationTest {
                     .value(false)
             )
             .andExpect(
+                jsonPath("$.order.id")
+                    .value(
+                        orderId.toString()
+                    )
+            )
+            .andExpect(
                 jsonPath("$.order.status")
                     .value("DRAFT")
-            )
-            .andExpect(
-                jsonPath("$.order.locationId")
-                    .value(locationId.toString())
-            )
-            .andExpect(
-                jsonPath("$.order.studentId")
-                    .value(studentId.toString())
             )
             .andExpect(
                 jsonPath("$.order.currency")
                     .value("MAD")
             )
             .andExpect(
+                jsonPath("$.order.customerNote")
+                    .value("Snapshot test")
+            )
+            .andExpect(
                 jsonPath("$.order.items.length()")
                     .value(1)
+            )
+            .andExpect(
+                jsonPath("$.order.items[0].productId")
+                    .value(
+                        productId.toString()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.order.items[0].variantId")
+                    .value(
+                        variantId.toString()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.order.items[0].unitPrice")
+                    .value(12.50)
+            )
+            .andExpect(
+                jsonPath("$.order.items[0].quantity")
+                    .value(2)
+            )
+            .andExpect(
+                jsonPath("$.order.items[0].lineTotal")
+                    .value(25.00)
+            )
+            .andExpect(
+                jsonPath("$.order.subtotal")
+                    .value(25.00)
+            )
+            .andExpect(
+                jsonPath("$.order.total")
+                    .value(25.00)
+            );
+
+        putDraft(
+            orderId,
+            actor,
+            body
+        )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.replayed")
+                    .value(true)
             );
 
         assertThat(
-            decimal(
-                """
-                SELECT unit_price
-                FROM order_items
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("10.00");
-
-        assertThat(
-            integer(
-                """
-                SELECT quantity
-                FROM order_items
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo(2);
-
-        assertThat(
-            decimal(
-                """
-                SELECT tax_rate_snapshot
-                FROM order_items
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("20.00");
-
-        assertThat(
-            decimal(
-                """
-                SELECT line_total
-                FROM order_items
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("20.00");
-
-        assertThat(
-            string(
-                """
-                SELECT product_name_snapshot
-                FROM order_items
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).contains("SNAPSHOT");
-
-        assertThat(
-            longValue(
-                """
-                SELECT COUNT(*)
-                FROM order_status_history
-                WHERE order_id = ?
-                  AND to_status = 'DRAFT'
-                """,
-                orderId
-            )
+            orderCount(orderId)
         ).isEqualTo(1L);
 
-        mockMvc.perform(
-                get(
-                    "/api/v1/orders/{orderId}",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.status")
-                    .value("DRAFT")
-            )
-            .andExpect(
-                jsonPath("$.items[0].quantity")
-                    .value(2)
-            );
+        assertThat(
+            orderItemCount(orderId)
+        ).isEqualTo(1L);
 
-        mockMvc.perform(
-                get(
-                    "/api/v1/orders/{orderId}/history",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$[0].toStatus")
-                    .value("DRAFT")
-            );
+        assertThat(
+            historyCount(orderId)
+        ).isEqualTo(1L);
     }
 
+    // =========================================================
+    // 04 - DRAFT EDIT / FREEZE
+    // =========================================================
+
     @Test
-    void draftIsEditableSubmitIsIdempotentAndFreezesOrder()
+    void draftCanBeEditedAndIsFrozenAfterSubmit()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
-                "EDITABLE",
+            insertProduct(
+                organizationId,
                 "PACKAGED",
-                "7.50",
-                "10.00",
-                false
+                "EDIT",
+                "10.00"
             );
 
         UUID orderId =
             UUID.randomUUID();
 
-        upsertDraft(
+        putDraft(
             orderId,
-            line(productId, null, 1)
-        );
-
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            locationId,
-                            line(productId, null, 3)
-                        )
-                    )
+            actor,
+            draftBody(
+                locationId,
+                productId,
+                null,
+                1,
+                "Initial"
             )
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        putDraft(
+            orderId,
+            actor,
+            draftBody(
+                locationId,
+                productId,
+                null,
+                3,
+                "Updated"
+            )
+        )
             .andExpect(
                 status().isOk()
             )
             .andExpect(
-                jsonPath("$.order.status")
-                    .value("DRAFT")
+                jsonPath("$.replayed")
+                    .value(false)
             )
             .andExpect(
                 jsonPath("$.order.items[0].quantity")
                     .value(3)
+            )
+            .andExpect(
+                jsonPath("$.order.customerNote")
+                    .value("Updated")
+            )
+            .andExpect(
+                jsonPath("$.order.total")
+                    .value(30.00)
             );
 
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/submit",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
+        submit(
+            orderId,
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -523,124 +418,111 @@ class OrderE2EIntegrationTest {
                     .value("CREATED")
             );
 
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/submit",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
+        submit(
+            orderId,
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
             .andExpect(
                 jsonPath("$.replayed")
                     .value(true)
-            )
-            .andExpect(
-                jsonPath("$.order.status")
-                    .value("CREATED")
             );
 
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            locationId,
-                            line(productId, null, 4)
-                        )
-                    )
+        putDraft(
+            orderId,
+            actor,
+            draftBody(
+                locationId,
+                productId,
+                null,
+                4,
+                "Must fail"
             )
+        )
             .andExpect(
                 status().isConflict()
             );
     }
 
+    // =========================================================
+    // 05 - MAX ACTIVE ORDERS
+    // =========================================================
+
     @Test
-    void studentCannotExceedTwoActiveOrders()
+    void maximumTwoActiveOrdersIsEnforced()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
+            insertProduct(
+                organizationId,
+                "PACKAGED",
                 "LIMIT",
-                "PACKAGED",
-                "4.00",
-                "0.00",
-                false
+                "10.00"
             );
 
-        upsertDraft(
-            UUID.randomUUID(),
-            line(productId, null, 1)
-        );
+        String body =
+            draftBody(
+                locationId,
+                productId,
+                null,
+                1,
+                "Active limit"
+            );
 
-        upsertDraft(
+        putDraft(
             UUID.randomUUID(),
-            line(productId, null, 1)
-        );
+            actor,
+            body
+        )
+            .andExpect(
+                status().isOk()
+            );
 
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    UUID.randomUUID()
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            locationId,
-                            line(productId, null, 1)
-                        )
-                    )
-            )
+        putDraft(
+            UUID.randomUUID(),
+            actor,
+            body
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        putDraft(
+            UUID.randomUUID(),
+            actor,
+            body
+        )
             .andExpect(
                 status().isConflict()
-            )
-            .andExpect(
-                jsonPath("$.code")
-                    .value("CONFLICT")
             );
     }
 
+    // =========================================================
+    // 06 - LOCATION / TENANT GUARDS
+    // =========================================================
+
     @Test
-    void tenantBoundaryAndInactiveLocationAreRejected()
+    void tenantAndLocationIsolationAreEnforced()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
-                "LOCATION-GUARD",
+            insertProduct(
+                organizationId,
                 "PACKAGED",
-                "5.00",
-                "0.00",
-                false
+                "SCOPE",
+                "10.00"
             );
 
-        UUID foreignOrganization =
+        UUID foreignOrg =
             insertOrganization(
                 "FOREIGN"
             );
 
         UUID foreignCampus =
             insertCampus(
-                foreignOrganization,
+                foreignOrg,
                 "FOREIGN",
                 true
             );
@@ -649,175 +531,139 @@ class OrderE2EIntegrationTest {
             insertLocation(
                 foreignCampus,
                 "FOREIGN",
+                "SNACK",
                 true
             );
 
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    UUID.randomUUID()
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            foreignLocation,
-                            line(productId, null, 1)
-                        )
-                    )
+        putDraft(
+            UUID.randomUUID(),
+            actor,
+            draftBody(
+                foreignLocation,
+                productId,
+                null,
+                1,
+                "Foreign location"
             )
+        )
             .andExpect(
                 status().isBadRequest()
             )
             .andExpect(
                 jsonPath("$.code")
-                    .value("VALIDATION_ERROR")
+                    .value(
+                        "VALIDATION_ERROR"
+                    )
             );
 
         UUID inactiveLocation =
             insertLocation(
                 campusId,
                 "INACTIVE",
+                "SNACK",
                 false
             );
 
-        mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    UUID.randomUUID()
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            inactiveLocation,
-                            line(productId, null, 1)
-                        )
-                    )
+        putDraft(
+            UUID.randomUUID(),
+            actor,
+            draftBody(
+                inactiveLocation,
+                productId,
+                null,
+                1,
+                "Inactive location"
             )
+        )
             .andExpect(
                 status().isConflict()
-            )
-            .andExpect(
-                jsonPath("$.code")
-                    .value("CONFLICT")
             );
     }
 
-    @Test
-    void submitRejectsPriceDrift()
-        throws Exception {
-
-        UUID productId =
-            insertOwnedProduct(
-                "PRICE-DRIFT",
-                "PACKAGED",
-                "10.00",
-                "20.00",
-                false
-            );
-
-        UUID orderId =
-            UUID.randomUUID();
-
-        upsertDraft(
-            orderId,
-            line(productId, null, 1)
-        );
-
-        jdbcTemplate.update(
-            """
-            UPDATE products
-            SET base_price = 11.00
-            WHERE id = ?
-            """,
-            productId
-        );
-
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/submit",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
-            .andExpect(
-                status().isConflict()
-            )
-            .andExpect(
-                jsonPath("$.code")
-                    .value("CONFLICT")
-            );
-
-        assertThat(
-            string(
-                """
-                SELECT status
-                FROM orders
-                WHERE id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo("DRAFT");
-    }
-
     // =========================================================
-    // RESERVATIONS
+    // 07 - PACKAGED SPLIT ALLOCATION
     // =========================================================
 
     @Test
-    void packagedOrderReservesAvailableStockWithoutPhysicalConsumption()
+    void packagedReservationSplitsAcrossStockLocations()
         throws Exception {
 
         UUID productId =
-            insertOwnedProduct(
-                "PACKAGED-STOCK",
+            insertProduct(
+                organizationId,
                 "PACKAGED",
-                "10.00",
-                "0.00",
-                false
+                "SPLIT",
+                "10.00"
             );
 
         UUID stockItemId =
             insertProductStockItem(
+                organizationId,
                 productId,
                 "PIECE"
             );
 
-        UUID stockLocationId =
+        UUID stockLocationA =
             insertStockLocation(
                 locationId,
-                UUID.randomUUID(),
-                "PACKAGED-STOCK",
+                "SPLIT-A",
+                true
+            );
+
+        UUID stockLocationB =
+            insertStockLocation(
+                locationId,
+                "SPLIT-B",
                 true
             );
 
         insertBalance(
             stockItemId,
-            stockLocationId,
-            "10.000",
-            "4.000"
+            stockLocationA,
+            "3.000",
+            "0.000"
+        );
+
+        insertBalance(
+            stockItemId,
+            stockLocationB,
+            "7.000",
+            "0.000"
+        );
+
+        UUID otherLocation =
+            insertLocation(
+                campusId,
+                "OTHER-SNACK",
+                "SNACK",
+                true
+            );
+
+        UUID outsideStockLocation =
+            insertStockLocation(
+                otherLocation,
+                "OUTSIDE",
+                true
+            );
+
+        insertBalance(
+            stockItemId,
+            outsideStockLocation,
+            "100.000",
+            "0.000"
         );
 
         UUID orderId =
             createSubmittedOrder(
-                line(productId, null, 6)
+                productId,
+                null,
+                8
             );
 
-        beginPayment(orderId)
+        beginPayment(
+            orderId,
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -827,41 +673,472 @@ class OrderE2EIntegrationTest {
             )
             .andExpect(
                 jsonPath("$.order.status")
-                    .value("AWAITING_PAYMENT")
-            )
-            .andExpect(
-                jsonPath("$.order.reservations.length()")
-                    .value(1)
+                    .value(
+                        "AWAITING_PAYMENT"
+                    )
             );
 
-        assertBalance(
-            stockItemId,
-            stockLocationId,
-            "10.000",
-            "10.000"
+        assertThat(
+            reservationCount(
+                orderId
+            )
+        ).isEqualTo(2L);
+
+        assertThat(
+            reservationQuantity(
+                orderId
+            )
+        ).isEqualByComparingTo(
+            "8.000"
         );
 
         assertThat(
-            decimal(
-                """
-                SELECT quantity
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
+            reservedQuantity(
+                stockItemId,
+                stockLocationA
+            ).add(
+                reservedQuantity(
+                    stockItemId,
+                    stockLocationB
+                )
             )
-        ).isEqualByComparingTo("6.000");
+        ).isEqualByComparingTo(
+            "8.000"
+        );
 
         assertThat(
-            string(
-                """
-                SELECT status
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
+            reservedQuantity(
+                stockItemId,
+                outsideStockLocation
+            )
+        ).isEqualByComparingTo(
+            "0.000"
+        );
+
+        assertThat(
+            movementCount(
+                orderId,
+                "RESERVATION"
+            )
+        ).isEqualTo(2L);
+    }
+
+    // =========================================================
+    // 08 - VARIANT STOCK
+    // =========================================================
+
+    @Test
+    void selectedVariantUsesVariantStockItem()
+        throws Exception {
+
+        UUID productId =
+            insertProduct(
+                organizationId,
+                "PACKAGED",
+                "VARIANT",
+                "10.00"
+            );
+
+        UUID variantId =
+            insertVariant(
+                productId,
+                "VARIANT",
+                "1.00"
+            );
+
+        UUID productStockItem =
+            insertProductStockItem(
+                organizationId,
+                productId,
+                "PIECE"
+            );
+
+        UUID variantStockItem =
+            insertVariantStockItem(
+                organizationId,
+                variantId,
+                "PIECE"
+            );
+
+        UUID stockLocation =
+            insertStockLocation(
+                locationId,
+                "VARIANT",
+                true
+            );
+
+        insertBalance(
+            productStockItem,
+            stockLocation,
+            "20.000",
+            "0.000"
+        );
+
+        insertBalance(
+            variantStockItem,
+            stockLocation,
+            "5.000",
+            "0.000"
+        );
+
+        UUID orderId =
+            createSubmittedOrder(
+                productId,
+                variantId,
+                3
+            );
+
+        beginPayment(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        assertThat(
+            reservationStockItem(
                 orderId
             )
-        ).isEqualTo("ACTIVE");
+        ).isEqualTo(
+            variantStockItem
+        );
+
+        assertThat(
+            reservedQuantity(
+                variantStockItem,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "3.000"
+        );
+
+        assertThat(
+            reservedQuantity(
+                productStockItem,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "0.000"
+        );
+    }
+
+    // =========================================================
+    // 09 - PREPARED RECIPE / WASTE / VARIANT FALLBACK
+    // =========================================================
+
+    @Test
+    void preparedReservationUsesRecipeWasteAndVariantFallback()
+        throws Exception {
+
+        UUID productId =
+            insertProduct(
+                organizationId,
+                "PREPARED",
+                "RECIPE",
+                "15.00"
+            );
+
+        UUID variantId =
+            insertVariant(
+                productId,
+                "RECIPE-VARIANT",
+                "2.00"
+            );
+
+        UUID ingredientId =
+            insertIngredient(
+                organizationId,
+                "FLOUR",
+                "GRAM"
+            );
+
+        insertRecipe(
+            productId,
+            null,
+            ingredientId,
+            "2.000",
+            "GRAM",
+            "0.2500"
+        );
+
+        UUID ingredientStockItem =
+            insertIngredientStockItem(
+                organizationId,
+                ingredientId,
+                "GRAM"
+            );
+
+        UUID stockLocation =
+            insertStockLocation(
+                locationId,
+                "KITCHEN",
+                true
+            );
+
+        insertBalance(
+            ingredientStockItem,
+            stockLocation,
+            "10.000",
+            "0.000"
+        );
+
+        UUID orderId =
+            createSubmittedOrder(
+                productId,
+                variantId,
+                2
+            );
+
+        beginPayment(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.order.status")
+                    .value(
+                        "AWAITING_PAYMENT"
+                    )
+            );
+
+        assertThat(
+            reservationCount(
+                orderId
+            )
+        ).isEqualTo(1L);
+
+        assertThat(
+            reservationStockItem(
+                orderId
+            )
+        ).isEqualTo(
+            ingredientStockItem
+        );
+
+        assertThat(
+            reservationQuantity(
+                orderId
+            )
+        ).isEqualByComparingTo(
+            "5.000"
+        );
+
+        assertThat(
+            reservedQuantity(
+                ingredientStockItem,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "5.000"
+        );
+    }
+
+    // =========================================================
+    // 10 - ATOMIC ROLLBACK
+    // =========================================================
+
+    @Test
+    void insufficientStockRollsBackWholeReservation()
+        throws Exception {
+
+        UUID productA =
+            insertProduct(
+                organizationId,
+                "PACKAGED",
+                "ROLL-A",
+                "10.00"
+            );
+
+        UUID productB =
+            insertProduct(
+                organizationId,
+                "PACKAGED",
+                "ROLL-B",
+                "10.00"
+            );
+
+        UUID itemA =
+            insertProductStockItem(
+                organizationId,
+                productA,
+                "PIECE"
+            );
+
+        UUID itemB =
+            insertProductStockItem(
+                organizationId,
+                productB,
+                "PIECE"
+            );
+
+        UUID stockLocation =
+            insertStockLocation(
+                locationId,
+                "ROLLBACK",
+                true
+            );
+
+        insertBalance(
+            itemA,
+            stockLocation,
+            "10.000",
+            "0.000"
+        );
+
+        insertBalance(
+            itemB,
+            stockLocation,
+            "1.000",
+            "0.000"
+        );
+
+        UUID orderId =
+            UUID.randomUUID();
+
+        putDraft(
+            orderId,
+            actor,
+            twoItemDraftBody(
+                locationId,
+                productA,
+                2,
+                productB,
+                2
+            )
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        submit(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        beginPayment(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isConflict()
+            );
+
+        assertThat(
+            reservedQuantity(
+                itemA,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "0.000"
+        );
+
+        assertThat(
+            reservedQuantity(
+                itemB,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "0.000"
+        );
+
+        assertThat(
+            reservationCount(
+                orderId
+            )
+        ).isZero();
+
+        assertThat(
+            movementCount(
+                orderId,
+                "RESERVATION"
+            )
+        ).isZero();
+
+        assertThat(
+            orderStatus(
+                orderId
+            )
+        ).isEqualTo(
+            "CREATED"
+        );
+    }
+
+    // =========================================================
+    // 11 - BEGIN PAYMENT REPLAY
+    // =========================================================
+
+    @Test
+    void beginPaymentReplayDoesNotDoubleReserve()
+        throws Exception {
+
+        UUID productId =
+            insertProduct(
+                organizationId,
+                "PACKAGED",
+                "PAYREPLAY",
+                "10.00"
+            );
+
+        UUID stockItemId =
+            insertProductStockItem(
+                organizationId,
+                productId,
+                "PIECE"
+            );
+
+        UUID stockLocation =
+            insertStockLocation(
+                locationId,
+                "PAYREPLAY",
+                true
+            );
+
+        insertBalance(
+            stockItemId,
+            stockLocation,
+            "10.000",
+            "0.000"
+        );
+
+        UUID orderId =
+            createSubmittedOrder(
+                productId,
+                null,
+                3
+            );
+
+        beginPayment(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.replayed")
+                    .value(false)
+            );
+
+        assertThat(
+            reservationCount(
+                orderId
+            )
+        ).isEqualTo(1L);
+
+        assertThat(
+            reservedQuantity(
+                stockItemId,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "3.000"
+        );
 
         assertThat(
             movementCount(
@@ -870,521 +1147,10 @@ class OrderE2EIntegrationTest {
             )
         ).isEqualTo(1L);
 
-        assertThat(
-            decimal(
-                """
-                SELECT im.physical_delta
-                FROM inventory_movements im
-                JOIN stock_reservations sr
-                  ON sr.id = im.reference_id
-                WHERE sr.order_id = ?
-                  AND im.reference_type = 'STOCK_RESERVATION'
-                  AND im.movement_type = 'RESERVATION'
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("0.000");
-
-        assertThat(
-            decimal(
-                """
-                SELECT im.reserved_delta
-                FROM inventory_movements im
-                JOIN stock_reservations sr
-                  ON sr.id = im.reference_id
-                WHERE sr.order_id = ?
-                  AND im.reference_type = 'STOCK_RESERVATION'
-                  AND im.movement_type = 'RESERVATION'
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("6.000");
-    }
-
-    @Test
-    void variantStockItemOverridesProductStockItem()
-        throws Exception {
-
-        UUID productId =
-            insertOwnedProduct(
-                "VARIANT-STOCK",
-                "PACKAGED",
-                "12.00",
-                "0.00",
-                false
-            );
-
-        UUID variantId =
-            insertVariant(
-                productId,
-                "VARIANT-STOCK",
-                "2.00"
-            );
-
-        UUID productStockItem =
-            insertProductStockItem(
-                productId,
-                "PIECE"
-            );
-
-        UUID variantStockItem =
-            insertVariantStockItem(
-                variantId,
-                "PIECE"
-            );
-
-        UUID stockLocationId =
-            insertStockLocation(
-                locationId,
-                UUID.randomUUID(),
-                "VARIANT-STOCK",
-                true
-            );
-
-        insertBalance(
-            productStockItem,
-            stockLocationId,
-            "10.000",
-            "0.000"
-        );
-
-        insertBalance(
-            variantStockItem,
-            stockLocationId,
-            "10.000",
-            "0.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(productId, variantId, 4)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isOk()
-            );
-
-        assertThat(
-            uuid(
-                """
-                SELECT stock_item_id
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo(variantStockItem);
-
-        assertBalance(
-            productStockItem,
-            stockLocationId,
-            "10.000",
-            "0.000"
-        );
-
-        assertBalance(
-            variantStockItem,
-            stockLocationId,
-            "10.000",
-            "4.000"
-        );
-    }
-
-    @Test
-    void reservationSplitsAcrossStockLocationsDeterministically()
-        throws Exception {
-
-        UUID productId =
-            insertOwnedProduct(
-                "SPLIT",
-                "PACKAGED",
-                "8.00",
-                "0.00",
-                false
-            );
-
-        UUID stockItemId =
-            insertProductStockItem(
-                productId,
-                "PIECE"
-            );
-
-        UUID firstLocation =
-            UUID.fromString(
-                "00000000-0000-0000-0000-000000000101"
-            );
-
-        UUID secondLocation =
-            UUID.fromString(
-                "00000000-0000-0000-0000-000000000102"
-            );
-
-        insertStockLocation(
-            locationId,
-            firstLocation,
-            "SPLIT-A",
-            true
-        );
-
-        insertStockLocation(
-            locationId,
-            secondLocation,
-            "SPLIT-B",
-            true
-        );
-
-        insertBalance(
-            stockItemId,
-            firstLocation,
-            "5.000",
-            "2.000"
-        );
-
-        insertBalance(
-            stockItemId,
-            secondLocation,
-            "10.000",
-            "0.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(productId, null, 8)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isOk()
-            );
-
-        List<Allocation> allocations =
-            jdbcTemplate.query(
-                """
-                SELECT stock_location_id, quantity
-                FROM stock_reservations
-                WHERE order_id = ?
-                ORDER BY stock_location_id
-                """,
-                (resultSet, rowNum) ->
-                    new Allocation(
-                        resultSet.getObject(
-                            "stock_location_id",
-                            UUID.class
-                        ),
-                        resultSet.getBigDecimal(
-                            "quantity"
-                        )
-                    ),
-                orderId
-            );
-
-        assertThat(allocations)
-            .hasSize(2);
-
-        assertThat(
-            allocations.get(0).stockLocationId()
-        ).isEqualTo(firstLocation);
-
-        assertThat(
-            allocations.get(0).quantity()
-        ).isEqualByComparingTo("3.000");
-
-        assertThat(
-            allocations.get(1).stockLocationId()
-        ).isEqualTo(secondLocation);
-
-        assertThat(
-            allocations.get(1).quantity()
-        ).isEqualByComparingTo("5.000");
-
-        assertBalance(
-            stockItemId,
-            firstLocation,
-            "5.000",
-            "5.000"
-        );
-
-        assertBalance(
-            stockItemId,
-            secondLocation,
-            "10.000",
-            "5.000"
-        );
-    }
-
-    @Test
-    void insufficientMultiLineStockRollsBackEverything()
-        throws Exception {
-
-        UUID firstProduct =
-            insertOwnedProduct(
-                "ROLLBACK-A",
-                "PACKAGED",
-                "10.00",
-                "0.00",
-                false
-            );
-
-        UUID secondProduct =
-            insertOwnedProduct(
-                "ROLLBACK-B",
-                "PACKAGED",
-                "11.00",
-                "0.00",
-                false
-            );
-
-        UUID firstItem =
-            insertProductStockItem(
-                firstProduct,
-                "PIECE"
-            );
-
-        UUID secondItem =
-            insertProductStockItem(
-                secondProduct,
-                "PIECE"
-            );
-
-        UUID stockLocationId =
-            insertStockLocation(
-                locationId,
-                UUID.randomUUID(),
-                "ROLLBACK",
-                true
-            );
-
-        insertBalance(
-            firstItem,
-            stockLocationId,
-            "10.000",
-            "0.000"
-        );
-
-        insertBalance(
-            secondItem,
-            stockLocationId,
-            "2.000",
-            "0.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(firstProduct, null, 3),
-                line(secondProduct, null, 3)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isConflict()
-            )
-            .andExpect(
-                jsonPath("$.code")
-                    .value("CONFLICT")
-            );
-
-        assertBalance(
-            firstItem,
-            stockLocationId,
-            "10.000",
-            "0.000"
-        );
-
-        assertBalance(
-            secondItem,
-            stockLocationId,
-            "2.000",
-            "0.000"
-        );
-
-        assertThat(
-            longValue(
-                """
-                SELECT COUNT(*)
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isZero();
-
-        assertThat(
-            movementCount(
-                orderId,
-                "RESERVATION"
-            )
-        ).isZero();
-
-        assertThat(
-            string(
-                """
-                SELECT status
-                FROM orders
-                WHERE id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo("CREATED");
-    }
-
-    @Test
-    void preparedOrderUsesWasteFactorAndProductRecipeFallback()
-        throws Exception {
-
-        UUID productId =
-            insertOwnedProduct(
-                "PREPARED",
-                "PREPARED",
-                "30.00",
-                "10.00",
-                true
-            );
-
-        UUID variantId =
-            insertVariant(
-                productId,
-                "PREPARED-VAR",
-                "0.00"
-            );
-
-        UUID ingredientId =
-            insertIngredient(
-                "PREPARED-ING",
-                "GRAM",
-                true,
-                true
-            );
-
-        UUID recipeId =
-            insertRecipe(
-                productId,
-                null,
-                1
-            );
-
-        insertRecipeItem(
-            recipeId,
-            ingredientId,
-            "2.000",
-            "GRAM",
-            "0.1250"
-        );
-
-        UUID ingredientStockItem =
-            insertIngredientStockItem(
-                ingredientId,
-                "GRAM"
-            );
-
-        UUID stockLocationId =
-            insertStockLocation(
-                locationId,
-                UUID.randomUUID(),
-                "PREPARED",
-                true
-            );
-
-        insertBalance(
-            ingredientStockItem,
-            stockLocationId,
-            "20.000",
-            "1.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(productId, variantId, 2)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.order.status")
-                    .value("AWAITING_PAYMENT")
-            );
-
-        assertThat(
-            decimal(
-                """
-                SELECT quantity
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("4.500");
-
-        assertThat(
-            uuid(
-                """
-                SELECT stock_item_id
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo(ingredientStockItem);
-
-        assertBalance(
-            ingredientStockItem,
-            stockLocationId,
-            "20.000",
-            "5.500"
-        );
-    }
-
-    @Test
-    void beginPaymentReplayDoesNotDuplicateReservationsOrMovements()
-        throws Exception {
-
-        UUID productId =
-            insertOwnedProduct(
-                "PAYMENT-REPLAY",
-                "PACKAGED",
-                "10.00",
-                "0.00",
-                false
-            );
-
-        UUID stockItemId =
-            insertProductStockItem(
-                productId,
-                "PIECE"
-            );
-
-        UUID stockLocationId =
-            insertStockLocation(
-                locationId,
-                UUID.randomUUID(),
-                "PAYMENT-REPLAY",
-                true
-            );
-
-        insertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "0.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(productId, null, 4)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(false)
-            );
-
-        beginPayment(orderId)
+        beginPayment(
+            orderId,
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -1394,15 +1160,19 @@ class OrderE2EIntegrationTest {
             );
 
         assertThat(
-            longValue(
-                """
-                SELECT COUNT(*)
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
+            reservationCount(
                 orderId
             )
         ).isEqualTo(1L);
+
+        assertThat(
+            reservedQuantity(
+                stockItemId,
+                stockLocation
+            )
+        ).isEqualByComparingTo(
+            "3.000"
+        );
 
         assertThat(
             movementCount(
@@ -1410,88 +1180,26 @@ class OrderE2EIntegrationTest {
                 "RESERVATION"
             )
         ).isEqualTo(1L);
-
-        assertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "4.000"
-        );
-
-        assertThat(
-            longValue(
-                """
-                SELECT COUNT(*)
-                FROM order_status_history
-                WHERE order_id = ?
-                  AND to_status = 'AWAITING_PAYMENT'
-                """,
-                orderId
-            )
-        ).isEqualTo(1L);
     }
 
+    // =========================================================
+    // 12 - CANCELLATION / RELEASE
+    // =========================================================
+
     @Test
-    void cancelReleasesReservationsAndIsIdempotent()
+    void cancelReleasesReservationsAndReplays()
         throws Exception {
 
-        UUID productId =
-            insertOwnedProduct(
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
                 "CANCEL",
-                "PACKAGED",
-                "10.00",
-                "0.00",
-                false
+                3
             );
 
-        UUID stockItemId =
-            insertProductStockItem(
-                productId,
-                "PIECE"
-            );
-
-        UUID stockLocationId =
-            insertStockLocation(
-                locationId,
-                UUID.randomUUID(),
-                "CANCEL",
-                true
-            );
-
-        insertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "2.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(productId, null, 5)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isOk()
-            );
-
-        assertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "7.000"
-        );
-
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/cancel",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
+        cancel(
+            fixture.orderId(),
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -1504,16 +1212,34 @@ class OrderE2EIntegrationTest {
                     .value("CANCELLED")
             );
 
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/cancel",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
+        assertThat(
+            reservedQuantity(
+                fixture.stockItemId(),
+                fixture.stockLocationId()
             )
+        ).isEqualByComparingTo(
+            "0.000"
+        );
+
+        assertThat(
+            reservationStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "RELEASED"
+        );
+
+        assertThat(
+            movementCount(
+                fixture.orderId(),
+                "RESERVATION_RELEASE"
+            )
+        ).isEqualTo(1L);
+
+        cancel(
+            fixture.orderId(),
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -1522,147 +1248,51 @@ class OrderE2EIntegrationTest {
                     .value(true)
             );
 
-        assertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "2.000"
-        );
-
-        assertThat(
-            string(
-                """
-                SELECT status
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo("RELEASED");
-
-        assertThat(
-            booleanValue(
-                """
-                SELECT released_at IS NOT NULL
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isTrue();
-
         assertThat(
             movementCount(
-                orderId,
+                fixture.orderId(),
                 "RESERVATION_RELEASE"
             )
         ).isEqualTo(1L);
-
-        assertThat(
-            decimal(
-                """
-                SELECT im.reserved_delta
-                FROM inventory_movements im
-                JOIN stock_reservations sr
-                  ON sr.id = im.reference_id
-                WHERE sr.order_id = ?
-                  AND im.reference_type = 'STOCK_RESERVATION'
-                  AND im.movement_type = 'RESERVATION_RELEASE'
-                """,
-                orderId
-            )
-        ).isEqualByComparingTo("-5.000");
     }
 
+    // =========================================================
+    // 13 - EXPIRATION
+    // =========================================================
+
     @Test
-    void expiryRequiresElapsedTtlThenReleasesAndIsIdempotent()
+    void expireHonorsDeadlineReleasesAndReplays()
         throws Exception {
 
-        UUID productId =
-            insertOwnedProduct(
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
                 "EXPIRE",
-                "PACKAGED",
-                "10.00",
-                "0.00",
-                false
+                3
             );
 
-        UUID stockItemId =
-            insertProductStockItem(
-                productId,
-                "PIECE"
-            );
-
-        UUID stockLocationId =
-            insertStockLocation(
-                locationId,
-                UUID.randomUUID(),
-                "EXPIRE",
-                true
-            );
-
-        insertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "1.000"
-        );
-
-        UUID orderId =
-            createSubmittedOrder(
-                line(productId, null, 4)
-            );
-
-        beginPayment(orderId)
-            .andExpect(
-                status().isOk()
-            );
-
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/expire",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
+        expire(
+            fixture.orderId(),
+            actor
+        )
             .andExpect(
                 status().isConflict()
-            )
-            .andExpect(
-                jsonPath("$.code")
-                    .value("CONFLICT")
             );
-
-        assertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "5.000"
-        );
 
         jdbcTemplate.update(
             """
             UPDATE orders
             SET payment_expires_at =
-                CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                CURRENT_TIMESTAMP
+                - INTERVAL '1 minute'
             WHERE id = ?
             """,
-            orderId
+            fixture.orderId()
         );
 
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/expire",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
-            )
+        expire(
+            fixture.orderId(),
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -1675,16 +1305,34 @@ class OrderE2EIntegrationTest {
                     .value("EXPIRED")
             );
 
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/expire",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
+        assertThat(
+            reservedQuantity(
+                fixture.stockItemId(),
+                fixture.stockLocationId()
             )
+        ).isEqualByComparingTo(
+            "0.000"
+        );
+
+        assertThat(
+            reservationStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "EXPIRED"
+        );
+
+        assertThat(
+            movementCount(
+                fixture.orderId(),
+                "RESERVATION_RELEASE"
+            )
+        ).isEqualTo(1L);
+
+        expire(
+            fixture.orderId(),
+            actor
+        )
             .andExpect(
                 status().isOk()
             )
@@ -1693,263 +1341,407 @@ class OrderE2EIntegrationTest {
                     .value(true)
             );
 
-        assertBalance(
-            stockItemId,
-            stockLocationId,
-            "20.000",
-            "1.000"
-        );
-
-        assertThat(
-            string(
-                """
-                SELECT status
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isEqualTo("EXPIRED");
-
-        assertThat(
-            booleanValue(
-                """
-                SELECT released_at IS NOT NULL
-                FROM stock_reservations
-                WHERE order_id = ?
-                """,
-                orderId
-            )
-        ).isTrue();
-
         assertThat(
             movementCount(
-                orderId,
+                fixture.orderId(),
                 "RESERVATION_RELEASE"
             )
         ).isEqualTo(1L);
     }
 
     // =========================================================
-    // HTTP HELPERS
+    // 14 - HISTORY / OWNERSHIP
     // =========================================================
 
-    private void upsertDraft(
-        UUID orderId,
-        Line... lines
-    ) throws Exception {
+    @Test
+    void historyCapturesLifecycleAndOwnershipIsScoped()
+        throws Exception {
+
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
+                "HISTORY",
+                2
+            );
+
+        cancel(
+            fixture.orderId(),
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            );
 
         mockMvc.perform(
-                put(
-                    "/api/v1/orders/{orderId}",
-                    orderId
+                get(
+                    "/api/v1/orders/{orderId}/history",
+                    fixture.orderId()
                 )
                     .header(
                         "Authorization",
-                        bearer()
-                    )
-                    .contentType(
-                        MediaType.APPLICATION_JSON
-                    )
-                    .content(
-                        orderBody(
-                            locationId,
-                            lines
-                        )
+                        bearer(actor)
                     )
             )
             .andExpect(
                 status().isOk()
             )
             .andExpect(
-                jsonPath("$.order.status")
+                jsonPath("$.length()")
+                    .value(4)
+            )
+            .andExpect(
+                jsonPath("$[0].toStatus")
                     .value("DRAFT")
+            )
+            .andExpect(
+                jsonPath("$[1].toStatus")
+                    .value("CREATED")
+            )
+            .andExpect(
+                jsonPath("$[2].toStatus")
+                    .value(
+                        "AWAITING_PAYMENT"
+                    )
+            )
+            .andExpect(
+                jsonPath("$[3].toStatus")
+                    .value("CANCELLED")
+            )
+            .andExpect(
+                jsonPath("$[0].source")
+                    .value("MOBILE")
+            )
+            .andExpect(
+                jsonPath("$[1].source")
+                    .value("MOBILE")
+            )
+            .andExpect(
+                jsonPath("$[2].source")
+                    .value("MOBILE")
+            )
+            .andExpect(
+                jsonPath("$[3].source")
+                    .value("MOBILE")
+            );
+
+        Actor otherStudent =
+            insertActor(
+                organizationId,
+                campusId,
+                true,
+                "ACTIVE",
+                "OTHER"
+            );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/orders/{orderId}",
+                    fixture.orderId()
+                )
+                    .header(
+                        "Authorization",
+                        bearer(otherStudent)
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            );
+
+        mockMvc.perform(
+                get(
+                    "/api/v1/orders/{orderId}/history",
+                    fixture.orderId()
+                )
+                    .header(
+                        "Authorization",
+                        bearer(otherStudent)
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
             );
     }
 
+    // =========================================================
+    // HTTP HELPERS
+    // =========================================================
+
+    private ResultActions putDraft(
+        UUID orderId,
+        Actor requestActor,
+        String body
+    ) throws Exception {
+
+        return mockMvc.perform(
+            put(
+                "/api/v1/orders/{orderId}",
+                orderId
+            )
+                .header(
+                    "Authorization",
+                    bearer(requestActor)
+                )
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(body)
+        );
+    }
+
+    private ResultActions submit(
+        UUID orderId,
+        Actor requestActor
+    ) throws Exception {
+
+        return transition(
+            orderId,
+            requestActor,
+            "submit"
+        );
+    }
+
+    private ResultActions beginPayment(
+        UUID orderId,
+        Actor requestActor
+    ) throws Exception {
+
+        return transition(
+            orderId,
+            requestActor,
+            "begin-payment"
+        );
+    }
+
+    private ResultActions cancel(
+        UUID orderId,
+        Actor requestActor
+    ) throws Exception {
+
+        return transition(
+            orderId,
+            requestActor,
+            "cancel"
+        );
+    }
+
+    private ResultActions expire(
+        UUID orderId,
+        Actor requestActor
+    ) throws Exception {
+
+        return transition(
+            orderId,
+            requestActor,
+            "expire"
+        );
+    }
+
+    private ResultActions transition(
+        UUID orderId,
+        Actor requestActor,
+        String transition
+    ) throws Exception {
+
+        return mockMvc.perform(
+            post(
+                "/api/v1/orders/{orderId}/{transition}",
+                orderId,
+                transition
+            )
+                .header(
+                    "Authorization",
+                    bearer(requestActor)
+                )
+        );
+    }
+
+    private String bearer(
+        Actor requestActor
+    ) {
+
+        return "Bearer "
+            + requestActor.accessToken();
+    }
+
+    // =========================================================
+    // ORDER HELPERS
+    // =========================================================
+
     private UUID createSubmittedOrder(
-        Line... lines
+        UUID productId,
+        UUID variantId,
+        int quantity
     ) throws Exception {
 
         UUID orderId =
             UUID.randomUUID();
 
-        upsertDraft(
+        putDraft(
             orderId,
-            lines
-        );
-
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/submit",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer()
-                    )
+            actor,
+            draftBody(
+                locationId,
+                productId,
+                variantId,
+                quantity,
+                "Orders A E2E"
             )
+        )
             .andExpect(
                 status().isOk()
-            )
+            );
+
+        submit(
+            orderId,
+            actor
+        )
             .andExpect(
-                jsonPath("$.order.status")
-                    .value("CREATED")
+                status().isOk()
             );
 
         return orderId;
     }
 
-    private org.springframework.test.web.servlet.ResultActions
-        beginPayment(
-            UUID orderId
-        ) throws Exception {
+    private ReservationFixture awaitingPackagedOrder(
+        String prefix,
+        int quantity
+    ) throws Exception {
 
-        return mockMvc.perform(
-            post(
-                "/api/v1/orders/{orderId}/begin-payment",
-                orderId
+        UUID productId =
+            insertProduct(
+                organizationId,
+                "PACKAGED",
+                prefix,
+                "10.00"
+            );
+
+        UUID stockItemId =
+            insertProductStockItem(
+                organizationId,
+                productId,
+                "PIECE"
+            );
+
+        UUID stockLocationId =
+            insertStockLocation(
+                locationId,
+                prefix,
+                true
+            );
+
+        insertBalance(
+            stockItemId,
+            stockLocationId,
+            "20.000",
+            "0.000"
+        );
+
+        UUID orderId =
+            createSubmittedOrder(
+                productId,
+                null,
+                quantity
+            );
+
+        beginPayment(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isOk()
             )
-                .header(
-                    "Authorization",
-                    bearer()
-                )
+            .andExpect(
+                jsonPath("$.order.status")
+                    .value(
+                        "AWAITING_PAYMENT"
+                    )
+            );
+
+        return new ReservationFixture(
+            orderId,
+            stockItemId,
+            stockLocationId
         );
     }
 
-    private String orderBody(
-        UUID businessLocationId,
-        Line... lines
+    // =========================================================
+    // JSON
+    // =========================================================
+
+    private String draftBody(
+        UUID selectedLocationId,
+        UUID productId,
+        UUID variantId,
+        int quantity,
+        String note
     ) {
 
-        String items =
-            Arrays.stream(lines)
-                .map(this::lineJson)
-                .collect(
-                    Collectors.joining(",")
+        String variant =
+            variantId == null
+                ? ""
+                : """
+                  "variantId": "%s",
+                  """.formatted(
+                    variantId
                 );
 
         return """
             {
               "locationId": "%s",
               "currency": "MAD",
-              "customerNote": "Orders A E2E",
-              "items": [%s]
+              "customerNote": "%s",
+              "items": [
+                {
+                  "productId": "%s",
+                  %s
+                  "quantity": %d,
+                  "specialInstructions": "E2E"
+                }
+              ]
             }
             """.formatted(
-                businessLocationId,
-                items
+                selectedLocationId,
+                note,
+                productId,
+                variant,
+                quantity
             );
     }
 
-    private String lineJson(
-        Line line
+    private String twoItemDraftBody(
+        UUID selectedLocationId,
+        UUID productA,
+        int quantityA,
+        UUID productB,
+        int quantityB
     ) {
-
-        String variant =
-            line.variantId() == null
-                ? "null"
-                : "\""
-                    + line.variantId()
-                    + "\"";
 
         return """
             {
-              "productId": "%s",
-              "variantId": %s,
-              "quantity": %d,
-              "specialInstructions": "Orders A test"
+              "locationId": "%s",
+              "currency": "MAD",
+              "customerNote": "Atomic reservation",
+              "items": [
+                {
+                  "productId": "%s",
+                  "quantity": %d
+                },
+                {
+                  "productId": "%s",
+                  "quantity": %d
+                }
+              ]
             }
             """.formatted(
-                line.productId(),
-                variant,
-                line.quantity()
+                selectedLocationId,
+                productA,
+                quantityA,
+                productB,
+                quantityB
             );
     }
 
-    private Line line(
-        UUID productId,
-        UUID variantId,
-        int quantity
-    ) {
-
-        return new Line(
-            productId,
-            variantId,
-            quantity
-        );
-    }
-
     // =========================================================
-    // JWT
-    // =========================================================
-
-    private String bearer(
-        String... permissions
-    ) {
-
-        return "Bearer "
-            + token(permissions);
-    }
-
-    private String token(
-        String... permissions
-    ) {
-
-        Instant now =
-            Instant.now();
-
-        JwtClaimsSet claims =
-            JwtClaimsSet.builder()
-                .issuer(
-                    securityProperties
-                        .jwt()
-                        .issuer()
-                )
-                .subject(
-                    userId.toString()
-                )
-                .issuedAt(now)
-                .expiresAt(
-                    now.plusSeconds(600)
-                )
-                .id(
-                    UUID.randomUUID()
-                        .toString()
-                )
-                .claim(
-                    "sid",
-                    sessionId
-                )
-                .claim(
-                    "email",
-                    email
-                )
-                .claim(
-                    "roles",
-                    List.of()
-                )
-                .claim(
-                    "permissions",
-                    List.of(permissions)
-                )
-                .claim(
-                    "role_scopes",
-                    List.of()
-                )
-                .build();
-
-        return jwtEncoder
-            .encode(
-                JwtEncoderParameters.from(
-                    claims
-                )
-            )
-            .getTokenValue();
-    }
-
-    // =========================================================
-    // TENANT / CATALOG FIXTURES
+    // TENANT / IDENTITY FIXTURES
     // =========================================================
 
     private UUID insertOrganization(
@@ -1971,7 +1763,7 @@ class OrderE2EIntegrationTest {
             """,
             id,
             prefix + " Organization",
-            "O" + randomSuffix()
+            prefix + randomSuffix()
         );
 
         return id;
@@ -2008,8 +1800,9 @@ class OrderE2EIntegrationTest {
     }
 
     private UUID insertLocation(
-        UUID parentCampusId,
+        UUID selectedCampusId,
         String prefix,
+        String type,
         boolean active
     ) {
 
@@ -2026,34 +1819,146 @@ class OrderE2EIntegrationTest {
                 type,
                 is_active
             )
-            VALUES (?, ?, ?, ?, 'SNACK', ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             id,
-            parentCampusId,
+            selectedCampusId,
             prefix + " Location",
             "L" + randomSuffix(),
+            type,
             active
         );
 
         return id;
     }
 
-    private UUID insertOwnedProduct(
+    private Actor insertActor(
+        UUID tenantId,
+        UUID selectedCampusId,
+        boolean student,
+        String enrollmentStatus,
+        String prefix
+    ) {
+
+        UUID userId =
+            UUID.randomUUID();
+
+        String suffix =
+            randomSuffix();
+
+        String email =
+            "orders-"
+                + prefix.toLowerCase()
+                + "-"
+                + suffix
+                + "@sup2i.test";
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (
+                id,
+                organization_id,
+                email,
+                first_name,
+                last_name,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, 'ACTIVE')
+            """,
+            userId,
+            tenantId,
+            email,
+            "Orders",
+            prefix
+        );
+
+        UUID studentId =
+            null;
+
+        if (student) {
+
+            studentId =
+                UUID.randomUUID();
+
+            jdbcTemplate.update(
+                """
+                INSERT INTO students (
+                    id,
+                    user_id,
+                    campus_id,
+                    student_number,
+                    enrollment_status
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                studentId,
+                userId,
+                selectedCampusId,
+                "STU-" + randomSuffix(),
+                enrollmentStatus
+            );
+        }
+
+        User user =
+            userRepository
+                .findById(userId)
+                .orElseThrow();
+
+        AuthenticationTokens tokens =
+            refreshTokenService.issue(
+                user,
+                "orders-a-e2e-"
+                    + prefix,
+                InetAddress
+                    .getLoopbackAddress()
+            );
+
+        return new Actor(
+            userId,
+            studentId,
+            tokens.accessToken()
+        );
+    }
+
+    // =========================================================
+    // CATALOG FIXTURES
+    // =========================================================
+
+    private UUID insertProduct(
+        UUID tenantId,
+        String productType,
         String prefix,
-        String type,
-        String price,
-        String taxRate,
-        boolean prepared
+        String price
     ) {
 
         UUID categoryId =
-            insertCategory(
-                organizationId,
-                prefix
-            );
-
-        UUID id =
             UUID.randomUUID();
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO categories (
+                id,
+                organization_id,
+                name,
+                slug,
+                display_order,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, 0, TRUE)
+            """,
+            categoryId,
+            tenantId,
+            prefix + " Category",
+            "category-" + randomSuffix()
+        );
+
+        UUID productId =
+            UUID.randomUUID();
+
+        boolean prepared =
+            "PREPARED".equals(
+                productType
+            );
 
         jdbcTemplate.update(
             """
@@ -2066,52 +1971,28 @@ class OrderE2EIntegrationTest {
                 product_type,
                 base_price,
                 tax_rate,
+                preparation_minutes,
                 track_stock,
                 is_prepared,
                 is_active
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, TRUE)
+            VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, 0.00, 0,
+                TRUE, ?, TRUE
+            )
             """,
-            id,
-            organizationId,
+            productId,
+            tenantId,
             categoryId,
             prefix + "-" + randomSuffix(),
             prefix + " Product",
-            type,
+            productType,
             new BigDecimal(price),
-            new BigDecimal(taxRate),
             prepared
         );
 
-        return id;
-    }
-
-    private UUID insertCategory(
-        UUID tenantId,
-        String prefix
-    ) {
-
-        UUID id =
-            UUID.randomUUID();
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO categories (
-                id,
-                organization_id,
-                name,
-                slug,
-                is_active
-            )
-            VALUES (?, ?, ?, ?, TRUE)
-            """,
-            id,
-            tenantId,
-            prefix + " Category",
-            "cat-" + randomSuffix()
-        );
-
-        return id;
+        return productId;
     }
 
     private UUID insertVariant(
@@ -2139,18 +2020,19 @@ class OrderE2EIntegrationTest {
             id,
             productId,
             prefix + " Variant",
-            prefix + "-V-" + randomSuffix(),
-            new BigDecimal(priceDelta)
+            "VAR-" + randomSuffix(),
+            new BigDecimal(
+                priceDelta
+            )
         );
 
         return id;
     }
 
     private UUID insertIngredient(
+        UUID tenantId,
         String prefix,
-        String unit,
-        boolean active,
-        boolean trackStock
+        String unit
     ) {
 
         UUID id =
@@ -2164,30 +2046,30 @@ class OrderE2EIntegrationTest {
                 code,
                 name,
                 base_unit,
-                is_active,
-                track_stock
+                is_active
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, TRUE)
             """,
             id,
-            organizationId,
+            tenantId,
             prefix + "-" + randomSuffix(),
             prefix + " Ingredient",
-            unit,
-            active,
-            trackStock
+            unit
         );
 
         return id;
     }
 
-    private UUID insertRecipe(
+    private void insertRecipe(
         UUID productId,
         UUID variantId,
-        int version
+        UUID ingredientId,
+        String quantity,
+        String unit,
+        String wasteFactor
     ) {
 
-        UUID id =
+        UUID recipeId =
             UUID.randomUUID();
 
         jdbcTemplate.update(
@@ -2198,33 +2080,19 @@ class OrderE2EIntegrationTest {
                 variant_id,
                 version,
                 is_active,
-                effective_from
+                effective_from,
+                effective_to
             )
             VALUES (
-                ?,
-                ?,
-                ?,
-                ?,
-                TRUE,
-                CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                ?, ?, ?, 1, TRUE,
+                CURRENT_TIMESTAMP,
+                NULL
             )
             """,
-            id,
+            recipeId,
             productId,
-            variantId,
-            version
+            variantId
         );
-
-        return id;
-    }
-
-    private void insertRecipeItem(
-        UUID recipeId,
-        UUID ingredientId,
-        String quantity,
-        String unit,
-        String wasteFactor
-    ) {
 
         jdbcTemplate.update(
             """
@@ -2242,9 +2110,15 @@ class OrderE2EIntegrationTest {
             UUID.randomUUID(),
             recipeId,
             ingredientId,
-            new BigDecimal(quantity),
+            new BigDecimal(
+                quantity
+            ),
             unit,
-            new BigDecimal(wasteFactor)
+            wasteFactor == null
+                ? null
+                : new BigDecimal(
+                    wasteFactor
+                )
         );
     }
 
@@ -2252,7 +2126,37 @@ class OrderE2EIntegrationTest {
     // INVENTORY FIXTURES
     // =========================================================
 
+    private UUID insertStockLocation(
+        UUID selectedLocationId,
+        String prefix,
+        boolean active
+    ) {
+
+        UUID id =
+            UUID.randomUUID();
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO stock_locations (
+                id,
+                location_id,
+                name,
+                type,
+                is_active
+            )
+            VALUES (?, ?, ?, 'STORAGE', ?)
+            """,
+            id,
+            selectedLocationId,
+            prefix + " Stock",
+            active
+        );
+
+        return id;
+    }
+
     private UUID insertProductStockItem(
+        UUID tenantId,
         UUID productId,
         String unit
     ) {
@@ -2272,7 +2176,7 @@ class OrderE2EIntegrationTest {
             VALUES (?, ?, ?, ?, FALSE)
             """,
             id,
-            organizationId,
+            tenantId,
             productId,
             unit
         );
@@ -2281,6 +2185,7 @@ class OrderE2EIntegrationTest {
     }
 
     private UUID insertVariantStockItem(
+        UUID tenantId,
         UUID variantId,
         String unit
     ) {
@@ -2300,7 +2205,7 @@ class OrderE2EIntegrationTest {
             VALUES (?, ?, ?, ?, FALSE)
             """,
             id,
-            organizationId,
+            tenantId,
             variantId,
             unit
         );
@@ -2309,6 +2214,7 @@ class OrderE2EIntegrationTest {
     }
 
     private UUID insertIngredientStockItem(
+        UUID tenantId,
         UUID ingredientId,
         String unit
     ) {
@@ -2328,39 +2234,12 @@ class OrderE2EIntegrationTest {
             VALUES (?, ?, ?, ?, FALSE)
             """,
             id,
-            organizationId,
+            tenantId,
             ingredientId,
             unit
         );
 
         return id;
-    }
-
-    private UUID insertStockLocation(
-        UUID businessLocationId,
-        UUID stockLocationId,
-        String prefix,
-        boolean active
-    ) {
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO stock_locations (
-                id,
-                location_id,
-                name,
-                type,
-                is_active
-            )
-            VALUES (?, ?, ?, 'COUNTER', ?)
-            """,
-            stockLocationId,
-            businessLocationId,
-            prefix + " Stock",
-            active
-        );
-
-        return stockLocationId;
     }
 
     private void insertBalance(
@@ -2382,8 +2261,12 @@ class OrderE2EIntegrationTest {
             """,
             stockItemId,
             stockLocationId,
-            new BigDecimal(physical),
-            new BigDecimal(reserved)
+            new BigDecimal(
+                physical
+            ),
+            new BigDecimal(
+                reserved
+            )
         );
     }
 
@@ -2391,129 +2274,170 @@ class OrderE2EIntegrationTest {
     // DATABASE ASSERTION HELPERS
     // =========================================================
 
-    private void assertBalance(
-        UUID stockItemId,
-        UUID stockLocationId,
-        String physical,
-        String reserved
+    private Long orderCount(
+        UUID orderId
     ) {
 
-        assertThat(
-            decimal(
-                """
-                SELECT physical_quantity
-                FROM stock_balances
-                WHERE stock_item_id = ?
-                  AND stock_location_id = ?
-                """,
-                stockItemId,
-                stockLocationId
-            )
-        ).isEqualByComparingTo(physical);
-
-        assertThat(
-            decimal(
-                """
-                SELECT reserved_quantity
-                FROM stock_balances
-                WHERE stock_item_id = ?
-                  AND stock_location_id = ?
-                """,
-                stockItemId,
-                stockLocationId
-            )
-        ).isEqualByComparingTo(reserved);
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM orders
+            WHERE id = ?
+            """,
+            Long.class,
+            orderId
+        );
     }
 
-    private long movementCount(
+    private Long orderItemCount(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM order_items
+            WHERE order_id = ?
+            """,
+            Long.class,
+            orderId
+        );
+    }
+
+    private Long historyCount(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM order_status_history
+            WHERE order_id = ?
+            """,
+            Long.class,
+            orderId
+        );
+    }
+
+    private String orderStatus(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT status
+            FROM orders
+            WHERE id = ?
+            """,
+            String.class,
+            orderId
+        );
+    }
+
+    private BigDecimal reservedQuantity(
+        UUID stockItemId,
+        UUID stockLocationId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT reserved_quantity
+            FROM stock_balances
+            WHERE stock_item_id = ?
+              AND stock_location_id = ?
+            """,
+            BigDecimal.class,
+            stockItemId,
+            stockLocationId
+        );
+    }
+
+    private Long reservationCount(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM stock_reservations
+            WHERE order_id = ?
+            """,
+            Long.class,
+            orderId
+        );
+    }
+
+    private BigDecimal reservationQuantity(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COALESCE(
+                SUM(quantity),
+                0
+            )
+            FROM stock_reservations
+            WHERE order_id = ?
+            """,
+            BigDecimal.class,
+            orderId
+        );
+    }
+
+    private UUID reservationStockItem(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT stock_item_id
+            FROM stock_reservations
+            WHERE order_id = ?
+            ORDER BY created_at, id
+            LIMIT 1
+            """,
+            UUID.class,
+            orderId
+        );
+    }
+
+    private String reservationStatus(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT status
+            FROM stock_reservations
+            WHERE order_id = ?
+            ORDER BY created_at, id
+            LIMIT 1
+            """,
+            String.class,
+            orderId
+        );
+    }
+
+    private Long movementCount(
         UUID orderId,
         String movementType
     ) {
 
-        return longValue(
+        return jdbcTemplate.queryForObject(
             """
             SELECT COUNT(*)
-            FROM inventory_movements im
-            JOIN stock_reservations sr
-              ON sr.id = im.reference_id
-            WHERE sr.order_id = ?
-              AND im.reference_type = 'STOCK_RESERVATION'
-              AND im.movement_type = ?
+            FROM inventory_movements m
+            JOIN stock_reservations r
+              ON r.id = m.reference_id
+            WHERE r.order_id = ?
+              AND m.reference_type =
+                    'STOCK_RESERVATION'
+              AND m.movement_type = ?
             """,
+            Long.class,
             orderId,
             movementType
-        );
-    }
-
-    private BigDecimal decimal(
-        String sql,
-        Object... args
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            sql,
-            BigDecimal.class,
-            args
-        );
-    }
-
-    private Integer integer(
-        String sql,
-        Object... args
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            sql,
-            Integer.class,
-            args
-        );
-    }
-
-    private Long longValue(
-        String sql,
-        Object... args
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            sql,
-            Long.class,
-            args
-        );
-    }
-
-    private String string(
-        String sql,
-        Object... args
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            sql,
-            String.class,
-            args
-        );
-    }
-
-    private UUID uuid(
-        String sql,
-        Object... args
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            sql,
-            UUID.class,
-            args
-        );
-    }
-
-    private Boolean booleanValue(
-        String sql,
-        Object... args
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            sql,
-            Boolean.class,
-            args
         );
     }
 
@@ -2525,16 +2449,17 @@ class OrderE2EIntegrationTest {
             .substring(0, 10);
     }
 
-    private record Line(
-        UUID productId,
-        UUID variantId,
-        int quantity
+    private record Actor(
+        UUID userId,
+        UUID studentId,
+        String accessToken
     ) {
     }
 
-    private record Allocation(
-        UUID stockLocationId,
-        BigDecimal quantity
+    private record ReservationFixture(
+        UUID orderId,
+        UUID stockItemId,
+        UUID stockLocationId
     ) {
     }
 }

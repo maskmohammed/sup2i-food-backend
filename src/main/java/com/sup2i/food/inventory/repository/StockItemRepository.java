@@ -42,4 +42,22 @@ public interface StockItemRepository
             Collection<UUID> ids,
             UUID organizationId
         );
+
+    Optional<StockItem>
+        findByOrganization_IdAndProduct_Id(
+            UUID organizationId,
+            UUID productId
+        );
+
+    Optional<StockItem>
+        findByOrganization_IdAndVariant_Id(
+            UUID organizationId,
+            UUID variantId
+        );
+
+    Optional<StockItem>
+        findByOrganization_IdAndIngredient_Id(
+            UUID organizationId,
+            UUID ingredientId
+        );
 }

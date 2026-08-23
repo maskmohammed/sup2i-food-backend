@@ -115,4 +115,64 @@ public class StockBalance {
         physicalQuantity =
             physicalQuantity.add(delta);
     }
+
+    public void reserve(
+        BigDecimal quantity
+    ) {
+
+        requirePositiveReservationQuantity(
+            quantity
+        );
+
+        if (
+            getAvailableQuantity()
+                .compareTo(quantity) < 0
+        ) {
+            throw new IllegalStateException(
+                "Insufficient available stock."
+            );
+        }
+
+        reservedQuantity =
+            reservedQuantity.add(
+                quantity
+            );
+    }
+
+    public void releaseReserved(
+        BigDecimal quantity
+    ) {
+
+        requirePositiveReservationQuantity(
+            quantity
+        );
+
+        if (
+            reservedQuantity
+                .compareTo(quantity) < 0
+        ) {
+            throw new IllegalStateException(
+                "Reserved stock cannot become negative."
+            );
+        }
+
+        reservedQuantity =
+            reservedQuantity.subtract(
+                quantity
+            );
+    }
+
+    private void requirePositiveReservationQuantity(
+        BigDecimal quantity
+    ) {
+
+        if (
+            quantity == null
+            || quantity.signum() <= 0
+        ) {
+            throw new IllegalArgumentException(
+                "Reservation quantity must be positive."
+            );
+        }
+    }
 }

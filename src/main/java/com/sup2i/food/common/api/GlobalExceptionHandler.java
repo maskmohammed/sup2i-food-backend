@@ -22,6 +22,9 @@ import com.sup2i.food.catalog.exception.ProductUnavailableException;
 import com.sup2i.food.inventory.exception.InventoryConflictException;
 import com.sup2i.food.inventory.exception.InventoryNotFoundException;
 import com.sup2i.food.inventory.exception.InventoryValidationException;
+import com.sup2i.food.order.exception.OrderConflictException;
+import com.sup2i.food.order.exception.OrderNotFoundException;
+import com.sup2i.food.order.exception.OrderValidationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -31,6 +34,59 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(
+        OrderValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        orderValidation(
+            OrderValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        OrderNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        orderNotFound(
+            OrderNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        OrderConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        orderConflict(
+            OrderConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
     @ExceptionHandler(
         InventoryValidationException.class
     )

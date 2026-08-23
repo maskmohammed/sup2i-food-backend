@@ -20,4 +20,9 @@ public interface StockLocationRepository
             UUID id,
             UUID organizationId
         );
+
+    List<StockLocation>
+        findAllByLocation_IdAndActiveTrue(
+            UUID locationId
+        );
 }

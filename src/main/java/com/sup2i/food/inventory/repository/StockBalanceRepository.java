@@ -106,4 +106,20 @@ public interface StockBalanceRepository
             @Param("organizationId")
             UUID organizationId
         );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select b
+        from StockBalance b
+        where b.stockItem.id = :stockItemId
+          and b.stockLocation.id in :stockLocationIds
+        order by b.stockLocation.id asc
+        """)
+    List<StockBalance> findLockedForAllocation(
+        @Param("stockItemId")
+        UUID stockItemId,
+
+        @Param("stockLocationIds")
+        List<UUID> stockLocationIds
+    );
 }

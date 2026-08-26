@@ -100,4 +100,30 @@ public interface StockLotRepository
             @Param("stockLocationId")
             UUID stockLocationId
         );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select l
+        from StockLot l
+        where l.stockItem.id = :stockItemId
+          and l.stockLocation.id = :stockLocationId
+          and l.quantityRemaining > 0
+        order by
+            case
+                when l.expiresAt is null
+                then 1
+                else 0
+            end asc,
+            l.expiresAt asc,
+            l.receivedAt asc,
+            l.id asc
+        """)
+    List<StockLot>
+        findConsumableLotsForUpdate(
+            @Param("stockItemId")
+            UUID stockItemId,
+
+            @Param("stockLocationId")
+            UUID stockLocationId
+        );
 }

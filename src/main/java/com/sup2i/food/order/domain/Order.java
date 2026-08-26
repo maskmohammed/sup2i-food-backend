@@ -428,6 +428,30 @@ public class Order {
             paymentExpiresAt;
     }
 
+    public void markPaid(
+        OffsetDateTime at
+    ) {
+
+        if (
+            status != OrderStatus.AWAITING_PAYMENT
+            || paymentStatus
+                != OrderPaymentStatus.PENDING
+        ) {
+            throw new IllegalStateException(
+                "Only an awaiting-payment order can be marked paid."
+            );
+        }
+
+        status =
+            OrderStatus.PAID;
+
+        paymentStatus =
+            OrderPaymentStatus.COMPLETED;
+
+        paidAt =
+            at;
+    }
+
     public void markCancelled(
         OffsetDateTime at
     ) {

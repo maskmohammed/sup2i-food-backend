@@ -162,6 +162,43 @@ public class StockBalance {
             );
     }
 
+    public void consumeReserved(
+        BigDecimal quantity
+    ) {
+
+        requirePositiveReservationQuantity(
+            quantity
+        );
+
+        if (
+            reservedQuantity
+                .compareTo(quantity) < 0
+        ) {
+            throw new IllegalStateException(
+                "Reserved stock cannot become negative."
+            );
+        }
+
+        if (
+            physicalQuantity
+                .compareTo(quantity) < 0
+        ) {
+            throw new IllegalStateException(
+                "Physical stock cannot become negative."
+            );
+        }
+
+        reservedQuantity =
+            reservedQuantity.subtract(
+                quantity
+            );
+
+        physicalQuantity =
+            physicalQuantity.subtract(
+                quantity
+            );
+    }
+
     private void requirePositiveReservationQuantity(
         BigDecimal quantity
     ) {

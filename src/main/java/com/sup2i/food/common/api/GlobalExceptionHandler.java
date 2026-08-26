@@ -25,6 +25,10 @@ import com.sup2i.food.inventory.exception.InventoryValidationException;
 import com.sup2i.food.order.exception.OrderConflictException;
 import com.sup2i.food.order.exception.OrderNotFoundException;
 import com.sup2i.food.order.exception.OrderValidationException;
+import com.sup2i.food.payment.exception.PaymentConflictException;
+import com.sup2i.food.payment.exception.PaymentErrorCode;
+import com.sup2i.food.payment.exception.PaymentNotFoundException;
+import com.sup2i.food.payment.exception.PaymentValidationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -87,6 +91,79 @@ public class GlobalExceptionHandler {
             Map.of()
         );
     }
+
+    @ExceptionHandler(
+        PaymentValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        paymentValidation(
+            PaymentValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            paymentHttpStatus(
+                exception.getErrorCode(),
+                HttpStatus.BAD_REQUEST
+            ),
+            paymentCode(
+                exception.getErrorCode(),
+                "VALIDATION_ERROR"
+            ),
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PaymentNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        paymentNotFound(
+            PaymentNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            paymentHttpStatus(
+                exception.getErrorCode(),
+                HttpStatus.NOT_FOUND
+            ),
+            paymentCode(
+                exception.getErrorCode(),
+                "NOT_FOUND"
+            ),
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PaymentConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        paymentConflict(
+            PaymentConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            paymentHttpStatus(
+                exception.getErrorCode(),
+                HttpStatus.CONFLICT
+            ),
+            paymentCode(
+                exception.getErrorCode(),
+                "CONFLICT"
+            ),
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
     @ExceptionHandler(
         InventoryValidationException.class
     )
@@ -416,6 +493,46 @@ public class GlobalExceptionHandler {
             request,
             Map.of()
         );
+    }
+
+    private HttpStatus paymentHttpStatus(
+        PaymentErrorCode errorCode,
+        HttpStatus fallback
+    ) {
+
+        if (errorCode == null) {
+            return fallback;
+        }
+
+        return switch (errorCode) {
+
+            case ORDER_NOT_FOUND ->
+                HttpStatus.NOT_FOUND;
+
+            case PAYMENT_AMOUNT_MISMATCH,
+                 PAYMENT_FAILED ->
+                HttpStatus.UNPROCESSABLE_CONTENT;
+
+            case INVALID_ORDER_STATUS,
+                 ORDER_EXPIRED,
+                 PAYMENT_ALREADY_COMPLETED,
+                 IDEMPOTENCY_CONFLICT,
+                 CONCURRENT_MODIFICATION,
+                 POS_SESSION_NOT_OPEN ->
+                HttpStatus.CONFLICT;
+        };
+    }
+
+    private String paymentCode(
+        PaymentErrorCode errorCode,
+        String fallback
+    ) {
+
+        if (errorCode == null) {
+            return fallback;
+        }
+
+        return errorCode.name();
     }
 
     private ResponseEntity<ApiErrorResponse>

@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name = "Catalog", description = "Categories, products, menus, recipes, and dietary metadata.")
 @RestController
 @RequestMapping(
     "/api/v1/admin/products"

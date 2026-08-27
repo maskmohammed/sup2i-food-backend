@@ -22,12 +22,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Locale;
 import java.util.UUID;
 
+@Tag(name = "Security", description = "Authentication, MFA, tokens, and the current-user profile.")
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {

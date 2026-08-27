@@ -13,10 +13,12 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
+@Tag(name = "Security", description = "Authentication, MFA, tokens, and the current-user profile.")
 @RestController
 @RequestMapping("/api/v1/me")
 public class MeController {

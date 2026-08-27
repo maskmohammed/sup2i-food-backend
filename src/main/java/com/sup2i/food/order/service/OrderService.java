@@ -49,6 +49,8 @@ import com.sup2i.food.order.repository.OrderStatusHistoryRepository;
 import com.sup2i.food.order.repository.StockReservationRepository;
 import com.sup2i.food.organization.domain.Location;
 import com.sup2i.food.organization.repository.LocationRepository;
+import com.sup2i.food.payment.domain.PaymentMethod;
+import com.sup2i.food.payment.service.PaymentService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -126,6 +128,7 @@ public class OrderService {
 
     private final InventoryAlertService inventoryAlertService;
     private final JdbcTemplate jdbcTemplate;
+    private final PaymentService paymentService;
 
     public OrderService(
         UserRepository userRepository,
@@ -144,7 +147,8 @@ public class OrderService {
         OrderStatusHistoryRepository historyRepository,
         StockReservationRepository reservationRepository,
         InventoryAlertService inventoryAlertService,
-        JdbcTemplate jdbcTemplate
+        JdbcTemplate jdbcTemplate,
+        PaymentService paymentService
     ) {
         this.userRepository =
             userRepository;
@@ -196,6 +200,9 @@ public class OrderService {
 
         this.jdbcTemplate =
             jdbcTemplate;
+
+        this.paymentService =
+            paymentService;
     }
 
     @Transactional
@@ -637,6 +644,13 @@ public class OrderService {
             OffsetDateTime.now();
 
         order.markPaid(now);
+
+        paymentService.recordCompletedPayment(
+            order,
+            PaymentMethod.ONLINE,
+            order.getTotal(),
+            now
+        );
 
         historyRepository.save(
             new OrderStatusHistory(

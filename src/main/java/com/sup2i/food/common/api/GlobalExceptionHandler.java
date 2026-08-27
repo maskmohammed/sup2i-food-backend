@@ -25,6 +25,9 @@ import com.sup2i.food.inventory.exception.InventoryValidationException;
 import com.sup2i.food.order.exception.OrderConflictException;
 import com.sup2i.food.order.exception.OrderNotFoundException;
 import com.sup2i.food.order.exception.OrderValidationException;
+import com.sup2i.food.payment.exception.PaymentConflictException;
+import com.sup2i.food.payment.exception.PaymentNotFoundException;
+import com.sup2i.food.payment.exception.PaymentValidationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -87,6 +90,60 @@ public class GlobalExceptionHandler {
             Map.of()
         );
     }
+    @ExceptionHandler(
+        PaymentValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        paymentValidation(
+            PaymentValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PaymentNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        paymentNotFound(
+            PaymentNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PaymentConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        paymentConflict(
+            PaymentConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
     @ExceptionHandler(
         InventoryValidationException.class
     )

@@ -1408,6 +1408,12 @@ class OrderE2EIntegrationTest {
             )
         ).isEqualTo(4L);
 
+        assertThat(
+            paymentCount(
+                fixture.orderId()
+            )
+        ).isEqualTo(1L);
+
         pay(
             fixture.orderId(),
             actor
@@ -1425,6 +1431,61 @@ class OrderE2EIntegrationTest {
                 fixture.orderId()
             )
         ).isEqualTo(4L);
+
+        assertThat(
+            paymentCount(
+                fixture.orderId()
+            )
+        ).isEqualTo(1L);
+    }
+
+    @Test
+    void payCreatesLinkedPaymentRecordMatchingOrderTotal()
+        throws Exception {
+
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
+                "PAYRECORD",
+                3
+            );
+
+        pay(
+            fixture.orderId(),
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        assertThat(
+            paymentCount(
+                fixture.orderId()
+            )
+        ).isEqualTo(1L);
+
+        assertThat(
+            paymentAmount(
+                fixture.orderId()
+            )
+        ).isEqualByComparingTo(
+            "30.00"
+        );
+
+        assertThat(
+            paymentStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "COMPLETED"
+        );
+
+        assertThat(
+            paymentMethod(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "ONLINE"
+        );
     }
 
     @Test
@@ -2606,6 +2667,66 @@ class OrderE2EIntegrationTest {
             WHERE id = ?
             """,
             OffsetDateTime.class,
+            orderId
+        );
+    }
+
+    private Long paymentCount(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM payments
+            WHERE order_id = ?
+            """,
+            Long.class,
+            orderId
+        );
+    }
+
+    private BigDecimal paymentAmount(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT amount
+            FROM payments
+            WHERE order_id = ?
+            """,
+            BigDecimal.class,
+            orderId
+        );
+    }
+
+    private String paymentStatus(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT status
+            FROM payments
+            WHERE order_id = ?
+            """,
+            String.class,
+            orderId
+        );
+    }
+
+    private String paymentMethod(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT method
+            FROM payments
+            WHERE order_id = ?
+            """,
+            String.class,
             orderId
         );
     }

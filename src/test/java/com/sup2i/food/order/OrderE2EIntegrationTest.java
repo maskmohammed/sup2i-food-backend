@@ -24,6 +24,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.net.InetAddress;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1350,7 +1351,240 @@ class OrderE2EIntegrationTest {
     }
 
     // =========================================================
-    // 14 - HISTORY / OWNERSHIP
+    // 14 - PAYMENT
+    // =========================================================
+
+    @Test
+    void payTransitionsAwaitingPaymentToPaidAndIsIdempotent()
+        throws Exception {
+
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
+                "PAY",
+                2
+            );
+
+        pay(
+            fixture.orderId(),
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.replayed")
+                    .value(false)
+            )
+            .andExpect(
+                jsonPath("$.order.status")
+                    .value("PAID")
+            );
+
+        assertThat(
+            orderStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "PAID"
+        );
+
+        assertThat(
+            orderPaymentStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "COMPLETED"
+        );
+
+        assertThat(
+            orderPaidAt(
+                fixture.orderId()
+            )
+        ).isNotNull();
+
+        assertThat(
+            historyCount(
+                fixture.orderId()
+            )
+        ).isEqualTo(4L);
+
+        pay(
+            fixture.orderId(),
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.replayed")
+                    .value(true)
+            );
+
+        assertThat(
+            historyCount(
+                fixture.orderId()
+            )
+        ).isEqualTo(4L);
+    }
+
+    @Test
+    void payDoesNotConsumeOrReleaseStockReservation()
+        throws Exception {
+
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
+                "PAYSTOCK",
+                2
+            );
+
+        BigDecimal reservedBefore =
+            reservedQuantity(
+                fixture.stockItemId(),
+                fixture.stockLocationId()
+            );
+
+        pay(
+            fixture.orderId(),
+            actor
+        )
+            .andExpect(
+                status().isOk()
+            );
+
+        assertThat(
+            reservationStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "ACTIVE"
+        );
+
+        assertThat(
+            reservedQuantity(
+                fixture.stockItemId(),
+                fixture.stockLocationId()
+            )
+        ).isEqualByComparingTo(
+            reservedBefore
+        );
+
+        assertThat(
+            movementCount(
+                fixture.orderId(),
+                "RESERVATION_RELEASE"
+            )
+        ).isZero();
+    }
+
+    @Test
+    void payRejectsWrongStatus()
+        throws Exception {
+
+        UUID productId =
+            insertProduct(
+                organizationId,
+                "PACKAGED",
+                "PAYWRONG",
+                "10.00"
+            );
+
+        UUID orderId =
+            createSubmittedOrder(
+                productId,
+                null,
+                1
+            );
+
+        pay(
+            orderId,
+            actor
+        )
+            .andExpect(
+                status().isConflict()
+            );
+
+        assertThat(
+            orderStatus(
+                orderId
+            )
+        ).isEqualTo(
+            "CREATED"
+        );
+
+        assertThat(
+            historyCount(
+                orderId
+            )
+        ).isEqualTo(2L);
+    }
+
+    @Test
+    void payRejectsCrossTenantAccess()
+        throws Exception {
+
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
+                "PAYSCOPE",
+                1
+            );
+
+        Actor otherStudent =
+            insertActor(
+                organizationId,
+                campusId,
+                true,
+                "ACTIVE",
+                "PAYOTHER"
+            );
+
+        pay(
+            fixture.orderId(),
+            otherStudent
+        )
+            .andExpect(
+                status().isNotFound()
+            );
+
+        assertThat(
+            orderStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "AWAITING_PAYMENT"
+        );
+    }
+
+    @Test
+    void payRejectsUnauthenticatedRequest()
+        throws Exception {
+
+        ReservationFixture fixture =
+            awaitingPackagedOrder(
+                "PAYAUTH",
+                1
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/orders/{orderId}/pay",
+                    fixture.orderId()
+                )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            );
+
+        assertThat(
+            orderStatus(
+                fixture.orderId()
+            )
+        ).isEqualTo(
+            "AWAITING_PAYMENT"
+        );
+    }
+
+    // =========================================================
+    // 15 - HISTORY / OWNERSHIP
     // =========================================================
 
     @Test
@@ -1532,6 +1766,18 @@ class OrderE2EIntegrationTest {
             orderId,
             requestActor,
             "expire"
+        );
+    }
+
+    private ResultActions pay(
+        UUID orderId,
+        Actor requestActor
+    ) throws Exception {
+
+        return transition(
+            orderId,
+            requestActor,
+            "pay"
         );
     }
 
@@ -2330,6 +2576,36 @@ class OrderE2EIntegrationTest {
             WHERE id = ?
             """,
             String.class,
+            orderId
+        );
+    }
+
+    private String orderPaymentStatus(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT payment_status
+            FROM orders
+            WHERE id = ?
+            """,
+            String.class,
+            orderId
+        );
+    }
+
+    private OffsetDateTime orderPaidAt(
+        UUID orderId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT paid_at
+            FROM orders
+            WHERE id = ?
+            """,
+            OffsetDateTime.class,
             orderId
         );
     }

@@ -597,6 +597,68 @@ public class OrderService {
     }
 
     @Transactional
+    public OrderMutationResponse pay(
+        UUID actorId,
+        UUID orderId
+    ) {
+
+        ActorContext context =
+            mobileStudent(actorId);
+
+        Order order =
+            lockedOwnedOrder(
+                orderId,
+                context
+            );
+
+        if (
+            order.getStatus()
+                == OrderStatus.PAID
+        ) {
+            return new OrderMutationResponse(
+                response(order),
+                true
+            );
+        }
+
+        if (
+            order.getStatus()
+                != OrderStatus.AWAITING_PAYMENT
+        ) {
+            throw new OrderConflictException(
+                "Only an AWAITING_PAYMENT order can be paid."
+            );
+        }
+
+        OrderStatus from =
+            order.getStatus();
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        order.markPaid(now);
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                from,
+                OrderStatus.PAID,
+                context.actor(),
+                null,
+                OrderStatusHistorySource.MOBILE
+            )
+        );
+
+        orderRepository
+            .saveAndFlush(order);
+
+        return new OrderMutationResponse(
+            response(order),
+            false
+        );
+    }
+
+    @Transactional
     public OrderMutationResponse cancel(
         UUID actorId,
         UUID orderId

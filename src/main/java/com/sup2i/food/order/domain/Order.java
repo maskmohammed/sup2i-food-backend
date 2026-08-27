@@ -458,4 +458,17 @@ public class Order {
                 OrderPaymentStatus.CANCELLED;
         }
     }
+
+    public void markPaid(
+        OffsetDateTime paidAt
+    ) {
+        status =
+            OrderStatus.PAID;
+
+        paymentStatus =
+            OrderPaymentStatus.COMPLETED;
+
+        this.paidAt =
+            paidAt;
+    }
 }

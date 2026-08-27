@@ -74,6 +74,18 @@ public class OrderController {
         );
     }
 
+    @PostMapping("/{orderId}/pay")
+    public OrderMutationResponse pay(
+        @PathVariable UUID orderId,
+        JwtAuthenticationToken authentication
+    ) {
+
+        return service.pay(
+            userId(authentication),
+            orderId
+        );
+    }
+
     @PostMapping("/{orderId}/cancel")
     public OrderMutationResponse cancel(
         @PathVariable UUID orderId,

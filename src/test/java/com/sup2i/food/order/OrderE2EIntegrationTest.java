@@ -1377,7 +1377,7 @@ class OrderE2EIntegrationTest {
             )
             .andExpect(
                 jsonPath("$.order.status")
-                    .value("PAID")
+                    .value("QUEUED")
             );
 
         assertThat(
@@ -1385,7 +1385,7 @@ class OrderE2EIntegrationTest {
                 fixture.orderId()
             )
         ).isEqualTo(
-            "PAID"
+            "QUEUED"
         );
 
         assertThat(
@@ -1406,7 +1406,7 @@ class OrderE2EIntegrationTest {
             historyCount(
                 fixture.orderId()
             )
-        ).isEqualTo(4L);
+        ).isEqualTo(5L);
 
         assertThat(
             paymentCount(
@@ -1430,7 +1430,7 @@ class OrderE2EIntegrationTest {
             historyCount(
                 fixture.orderId()
             )
-        ).isEqualTo(4L);
+        ).isEqualTo(5L);
 
         assertThat(
             paymentCount(

@@ -471,4 +471,24 @@ public class Order {
         this.paidAt =
             paidAt;
     }
+
+    public void markQueued() {
+        status =
+            OrderStatus.QUEUED;
+    }
+
+    public void markPreparing() {
+        status =
+            OrderStatus.PREPARING;
+    }
+
+    public void markReady(
+        OffsetDateTime readyAt
+    ) {
+        status =
+            OrderStatus.READY;
+
+        this.readyAt =
+            readyAt;
+    }
 }

@@ -33,6 +33,8 @@ import com.sup2i.food.qr.exception.QrConflictException;
 import com.sup2i.food.qr.exception.QrExpiredException;
 import com.sup2i.food.qr.exception.QrNotFoundException;
 import com.sup2i.food.qr.exception.QrRevokedException;
+import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
+import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -227,6 +229,42 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse>
         qrConflict(
             QrConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        KitchenTicketNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        kitchenTicketNotFound(
+            KitchenTicketNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        KitchenTicketConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        kitchenTicketConflict(
+            KitchenTicketConflictException exception,
             HttpServletRequest request
         ) {
 

@@ -25,6 +25,7 @@ import com.sup2i.food.inventory.repository.StockBalanceRepository;
 import com.sup2i.food.inventory.repository.StockItemRepository;
 import com.sup2i.food.inventory.repository.StockLocationRepository;
 import com.sup2i.food.inventory.service.InventoryAlertService;
+import com.sup2i.food.kitchen.service.KitchenTicketService;
 import com.sup2i.food.order.api.dto.OrderItemResponse;
 import com.sup2i.food.order.api.dto.OrderMutationResponse;
 import com.sup2i.food.order.api.dto.OrderResponse;
@@ -109,6 +110,17 @@ public class OrderService {
                 OrderStatus.COLLECTED
             );
 
+    private static final List<OrderStatus>
+        PAID_OR_LATER_STATUSES =
+            List.of(
+                OrderStatus.PAID,
+                OrderStatus.QUEUED,
+                OrderStatus.PREPARING,
+                OrderStatus.READY,
+                OrderStatus.COLLECTED,
+                OrderStatus.COMPLETED
+            );
+
     private final UserRepository userRepository;
     private final StudentRepository studentRepository;
     private final LocationRepository locationRepository;
@@ -132,6 +144,7 @@ public class OrderService {
     private final JdbcTemplate jdbcTemplate;
     private final PaymentService paymentService;
     private final QrCredentialService qrCredentialService;
+    private final KitchenTicketService kitchenTicketService;
 
     public OrderService(
         UserRepository userRepository,
@@ -152,7 +165,8 @@ public class OrderService {
         InventoryAlertService inventoryAlertService,
         JdbcTemplate jdbcTemplate,
         PaymentService paymentService,
-        QrCredentialService qrCredentialService
+        QrCredentialService qrCredentialService,
+        KitchenTicketService kitchenTicketService
     ) {
         this.userRepository =
             userRepository;
@@ -210,6 +224,9 @@ public class OrderService {
 
         this.qrCredentialService =
             qrCredentialService;
+
+        this.kitchenTicketService =
+            kitchenTicketService;
     }
 
     @Transactional
@@ -633,8 +650,10 @@ public class OrderService {
             );
 
         if (
-            order.getStatus()
-                == OrderStatus.PAID
+            PAID_OR_LATER_STATUSES
+                .contains(
+                    order.getStatus()
+                )
         ) {
             return new OrderMutationResponse(
                 response(order, null),
@@ -673,6 +692,27 @@ public class OrderService {
                 OrderStatus.PAID,
                 context.actor(),
                 null,
+                OrderStatusHistorySource.MOBILE
+            )
+        );
+
+        kitchenTicketService
+            .createTicketForPaidOrder(
+                order
+            );
+
+        OrderStatus paidStatus =
+            order.getStatus();
+
+        order.markQueued();
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                paidStatus,
+                OrderStatus.QUEUED,
+                context.actor(),
+                "Kitchen ticket created.",
                 OrderStatusHistorySource.MOBILE
             )
         );

@@ -30,6 +30,7 @@ public record OrderResponse(
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt,
     List<OrderItemResponse> items,
-    List<StockReservationResponse> reservations
+    List<StockReservationResponse> reservations,
+    String qrToken
 ) {
 }

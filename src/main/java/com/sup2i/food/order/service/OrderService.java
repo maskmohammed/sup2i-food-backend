@@ -51,6 +51,8 @@ import com.sup2i.food.organization.domain.Location;
 import com.sup2i.food.organization.repository.LocationRepository;
 import com.sup2i.food.payment.domain.PaymentMethod;
 import com.sup2i.food.payment.service.PaymentService;
+import com.sup2i.food.qr.domain.QrCredentialType;
+import com.sup2i.food.qr.service.QrCredentialService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -129,6 +131,7 @@ public class OrderService {
     private final InventoryAlertService inventoryAlertService;
     private final JdbcTemplate jdbcTemplate;
     private final PaymentService paymentService;
+    private final QrCredentialService qrCredentialService;
 
     public OrderService(
         UserRepository userRepository,
@@ -148,7 +151,8 @@ public class OrderService {
         StockReservationRepository reservationRepository,
         InventoryAlertService inventoryAlertService,
         JdbcTemplate jdbcTemplate,
-        PaymentService paymentService
+        PaymentService paymentService,
+        QrCredentialService qrCredentialService
     ) {
         this.userRepository =
             userRepository;
@@ -203,6 +207,9 @@ public class OrderService {
 
         this.paymentService =
             paymentService;
+
+        this.qrCredentialService =
+            qrCredentialService;
     }
 
     @Transactional
@@ -335,7 +342,7 @@ public class OrderService {
             )
         ) {
             return new OrderMutationResponse(
-                response(order),
+                response(order, null),
                 true
             );
         }
@@ -422,7 +429,7 @@ public class OrderService {
         }
 
         return new OrderMutationResponse(
-            response(order),
+            response(order, null),
             false
         );
     }
@@ -447,7 +454,7 @@ public class OrderService {
                 == OrderStatus.CREATED
         ) {
             return new OrderMutationResponse(
-                response(order),
+                response(order, null),
                 true
             );
         }
@@ -500,7 +507,7 @@ public class OrderService {
             .saveAndFlush(order);
 
         return new OrderMutationResponse(
-            response(order),
+            response(order, null),
             false
         );
     }
@@ -525,7 +532,7 @@ public class OrderService {
                 == OrderStatus.AWAITING_PAYMENT
         ) {
             return new OrderMutationResponse(
-                response(order),
+                response(order, null),
                 true
             );
         }
@@ -578,6 +585,13 @@ public class OrderService {
             expiresAt
         );
 
+        String qrToken =
+            qrCredentialService.issue(
+                QrCredentialType.ORDER,
+                order.getId(),
+                expiresAt
+            );
+
         historyRepository.save(
             new OrderStatusHistory(
                 order,
@@ -598,7 +612,7 @@ public class OrderService {
             );
 
         return new OrderMutationResponse(
-            response(order),
+            response(order, qrToken),
             false
         );
     }
@@ -623,7 +637,7 @@ public class OrderService {
                 == OrderStatus.PAID
         ) {
             return new OrderMutationResponse(
-                response(order),
+                response(order, null),
                 true
             );
         }
@@ -667,7 +681,7 @@ public class OrderService {
             .saveAndFlush(order);
 
         return new OrderMutationResponse(
-            response(order),
+            response(order, null),
             false
         );
     }
@@ -692,7 +706,7 @@ public class OrderService {
                 == OrderStatus.CANCELLED
         ) {
             return new OrderMutationResponse(
-                response(order),
+                response(order, null),
                 true
             );
         }
@@ -756,7 +770,7 @@ public class OrderService {
         }
 
         return new OrderMutationResponse(
-            response(order),
+            response(order, null),
             false
         );
     }
@@ -781,7 +795,7 @@ public class OrderService {
                 == OrderStatus.EXPIRED
         ) {
             return new OrderMutationResponse(
-                response(order),
+                response(order, null),
                 true
             );
         }
@@ -844,7 +858,7 @@ public class OrderService {
         }
 
         return new OrderMutationResponse(
-            response(order),
+            response(order, null),
             false
         );
     }
@@ -877,7 +891,7 @@ public class OrderService {
             context.student()
         );
 
-        return response(order);
+        return response(order, null);
     }
 
     @Transactional(readOnly = true)
@@ -2185,7 +2199,8 @@ public class OrderService {
     }
 
     private OrderResponse response(
-        Order order
+        Order order,
+        String qrToken
     ) {
 
         List<OrderItemResponse> items =
@@ -2277,7 +2292,8 @@ public class OrderService {
             order.getCreatedAt(),
             order.getUpdatedAt(),
             items,
-            reservations
+            reservations,
+            qrToken
         );
     }
 

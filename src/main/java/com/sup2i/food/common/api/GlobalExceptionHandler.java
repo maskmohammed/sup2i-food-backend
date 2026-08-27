@@ -28,6 +28,11 @@ import com.sup2i.food.order.exception.OrderValidationException;
 import com.sup2i.food.payment.exception.PaymentConflictException;
 import com.sup2i.food.payment.exception.PaymentNotFoundException;
 import com.sup2i.food.payment.exception.PaymentValidationException;
+import com.sup2i.food.qr.exception.QrAlreadyUsedException;
+import com.sup2i.food.qr.exception.QrConflictException;
+import com.sup2i.food.qr.exception.QrExpiredException;
+import com.sup2i.food.qr.exception.QrNotFoundException;
+import com.sup2i.food.qr.exception.QrRevokedException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -132,6 +137,96 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse>
         paymentConflict(
             PaymentConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        QrNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        qrNotFound(
+            QrNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        QrExpiredException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        qrExpired(
+            QrExpiredException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        QrRevokedException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        qrRevoked(
+            QrRevokedException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        QrAlreadyUsedException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        qrAlreadyUsed(
+            QrAlreadyUsedException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        QrConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        qrConflict(
+            QrConflictException exception,
             HttpServletRequest request
         ) {
 

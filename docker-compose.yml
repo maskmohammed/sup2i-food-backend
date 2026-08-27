@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:17.10-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sup2i_food}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example first)}
+    ports:
+      - "5432:5432"
+    volumes:
+      - sup2i_food_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sup2i_food}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Points at the "db" Docker service, not localhost — the backend and
+      # PostgreSQL run in separate containers on the compose network.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-sup2i_food}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example first)}
+      SUP2I_JWT_SECRET_BASE64: ${SUP2I_JWT_SECRET_BASE64:?Set SUP2I_JWT_SECRET_BASE64 in .env (copy .env.example first)}
+      SUP2I_MFA_ENCRYPTION_KEY_BASE64: ${SUP2I_MFA_ENCRYPTION_KEY_BASE64:?Set SUP2I_MFA_ENCRYPTION_KEY_BASE64 in .env (copy .env.example first)}
+      SUP2I_CORS_ENABLED: ${SUP2I_CORS_ENABLED:-false}
+      SUP2I_CORS_ALLOWED_ORIGINS: ${SUP2I_CORS_ALLOWED_ORIGINS:-}
+
+volumes:
+  sup2i_food_db_data:
+    name: sup2i_food_db_data

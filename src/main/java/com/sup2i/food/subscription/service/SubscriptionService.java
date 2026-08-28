@@ -2,6 +2,7 @@ package com.sup2i.food.subscription.service;
 
 import com.sup2i.food.catalog.api.dto.PageResponse;
 import com.sup2i.food.common.domain.MealType;
+import com.sup2i.food.promotion.service.LoyaltyService;
 import com.sup2i.food.identity.domain.Student;
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.StudentRepository;
@@ -70,6 +71,7 @@ public class SubscriptionService {
     private final SubscriptionPlanService planService;
     private final StudentRepository studentRepository;
     private final UserRepository userRepository;
+    private final LoyaltyService loyaltyService;
 
     public SubscriptionService(
         SubscriptionRepository subscriptionRepository,
@@ -77,7 +79,8 @@ public class SubscriptionService {
         SubscriptionStatusHistoryRepository historyRepository,
         SubscriptionPlanService planService,
         StudentRepository studentRepository,
-        UserRepository userRepository
+        UserRepository userRepository,
+        LoyaltyService loyaltyService
     ) {
         this.subscriptionRepository =
             subscriptionRepository;
@@ -96,6 +99,9 @@ public class SubscriptionService {
 
         this.userRepository =
             userRepository;
+
+        this.loyaltyService =
+            loyaltyService;
     }
 
     // =========================================================
@@ -408,6 +414,11 @@ public class SubscriptionService {
 
         subscriptionRepository
             .saveAndFlush(subscription);
+
+        loyaltyService.earnForSubscription(
+            subscription,
+            actorId
+        );
 
         return new SubscriptionMutationResponse(
             response(subscription),

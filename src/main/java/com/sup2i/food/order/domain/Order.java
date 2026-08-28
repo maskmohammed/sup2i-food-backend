@@ -20,6 +20,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -417,6 +418,27 @@ public class Order {
     public void markCreated() {
         status =
             OrderStatus.CREATED;
+    }
+
+    public void applyDiscount(
+        BigDecimal discountAmount
+    ) {
+        this.discountTotal =
+            this.discountTotal
+                .add(discountAmount)
+                .setScale(
+                    2,
+                    RoundingMode.HALF_UP
+                );
+
+        this.total =
+            this.subtotal
+                .subtract(this.discountTotal)
+                .max(BigDecimal.ZERO)
+                .setScale(
+                    2,
+                    RoundingMode.HALF_UP
+                );
     }
 
     public void markAwaitingPayment(

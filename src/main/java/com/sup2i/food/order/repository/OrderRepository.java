@@ -43,6 +43,25 @@ public interface OrderRepository
         UUID organizationId
     );
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select o
+        from Order o
+        where o.id = :orderId
+          and o.organization.id = :organizationId
+          and o.student.id = :studentId
+        """)
+    Optional<Order> findStudentOwnedForUpdate(
+        @Param("orderId")
+        UUID orderId,
+
+        @Param("organizationId")
+        UUID organizationId,
+
+        @Param("studentId")
+        UUID studentId
+    );
+
     long countByStudent_IdAndStatusIn(
         UUID studentId,
         Collection<OrderStatus> statuses

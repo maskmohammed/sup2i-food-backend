@@ -30,6 +30,13 @@ import com.sup2i.food.order.exception.OrderValidationException;
 import com.sup2i.food.payment.exception.PaymentConflictException;
 import com.sup2i.food.payment.exception.PaymentNotFoundException;
 import com.sup2i.food.payment.exception.PaymentValidationException;
+import com.sup2i.food.promotion.exception.CouponIneligibleException;
+import com.sup2i.food.promotion.exception.CouponNotFoundException;
+import com.sup2i.food.promotion.exception.CouponUsageLimitException;
+import com.sup2i.food.promotion.exception.CouponValidationException;
+import com.sup2i.food.promotion.exception.LoyaltyConflictException;
+import com.sup2i.food.promotion.exception.LoyaltyInsufficientBalanceException;
+import com.sup2i.food.promotion.exception.LoyaltyValidationException;
 import com.sup2i.food.qr.exception.QrAlreadyUsedException;
 import com.sup2i.food.qr.exception.QrConflictException;
 import com.sup2i.food.qr.exception.QrExpiredException;
@@ -543,6 +550,132 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse>
         catalogConflict(
             CatalogConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        CouponValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        couponValidation(
+            CouponValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        CouponNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        couponNotFound(
+            CouponNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        CouponIneligibleException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        couponIneligible(
+            CouponIneligibleException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "COUPON_INELIGIBLE",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        CouponUsageLimitException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        couponUsageLimit(
+            CouponUsageLimitException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "USAGE_LIMIT_REACHED",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        LoyaltyValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        loyaltyValidation(
+            LoyaltyValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        LoyaltyInsufficientBalanceException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        loyaltyInsufficientBalance(
+            LoyaltyInsufficientBalanceException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "INSUFFICIENT_LOYALTY_BALANCE",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        LoyaltyConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        loyaltyConflict(
+            LoyaltyConflictException exception,
             HttpServletRequest request
         ) {
 

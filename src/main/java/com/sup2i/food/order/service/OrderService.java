@@ -55,6 +55,7 @@ import com.sup2i.food.payment.domain.PaymentMethod;
 import com.sup2i.food.payment.service.PaymentService;
 import com.sup2i.food.qr.domain.QrCredentialType;
 import com.sup2i.food.qr.service.QrCredentialService;
+import com.sup2i.food.promotion.service.LoyaltyService;
 import com.sup2i.food.timeslot.domain.TimeSlot;
 import com.sup2i.food.timeslot.service.TimeSlotService;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -151,6 +152,7 @@ public class OrderService {
     private final KitchenTicketService kitchenTicketService;
     private final TimeSlotService timeSlotService;
     private final NotificationService notificationService;
+    private final LoyaltyService loyaltyService;
 
     public OrderService(
         UserRepository userRepository,
@@ -174,7 +176,8 @@ public class OrderService {
         QrCredentialService qrCredentialService,
         KitchenTicketService kitchenTicketService,
         TimeSlotService timeSlotService,
-        NotificationService notificationService
+        NotificationService notificationService,
+        LoyaltyService loyaltyService
     ) {
         this.userRepository =
             userRepository;
@@ -241,6 +244,9 @@ public class OrderService {
 
         this.notificationService =
             notificationService;
+
+        this.loyaltyService =
+            loyaltyService;
     }
 
     @Transactional
@@ -359,10 +365,18 @@ public class OrderService {
                 true;
         }
 
+        BigDecimal existingDiscount =
+            created
+                ? BigDecimal.ZERO
+                    .setScale(2)
+                : order
+                    .getDiscountTotal();
+
         DraftSnapshot snapshot =
             buildDraftSnapshot(
                 request,
-                context.organizationId()
+                context.organizationId(),
+                existingDiscount
             );
 
         if (
@@ -393,8 +407,7 @@ public class OrderService {
             snapshot.customerNote(),
             snapshot.subtotal(),
             snapshot.taxTotal(),
-            BigDecimal.ZERO
-                .setScale(2),
+            existingDiscount,
             snapshot.total(),
             snapshot.slotId()
         );
@@ -755,6 +768,11 @@ public class OrderService {
         orderRepository
             .saveAndFlush(order);
 
+        loyaltyService.earnForOrder(
+            order,
+            actorId
+        );
+
         notificationService
             .notifyOrderQueued(order);
 
@@ -1037,7 +1055,8 @@ public class OrderService {
 
     private DraftSnapshot buildDraftSnapshot(
         UpsertOrderRequest request,
-        UUID organizationId
+        UUID organizationId,
+        BigDecimal existingDiscount
     ) {
 
         String currency =
@@ -1187,7 +1206,10 @@ public class OrderService {
                 .setScale(2);
 
         BigDecimal total =
-            subtotal;
+            subtotal
+                .subtract(existingDiscount)
+                .max(BigDecimal.ZERO)
+                .setScale(2);
 
         UUID slotId =
             null;

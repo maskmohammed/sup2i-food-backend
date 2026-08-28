@@ -28,6 +28,11 @@ sup2i:
 
     refresh-token-ttl: 30d
 
+  loyalty:
+    mad-per-point: 10
+    points-per-reward: 100
+    reward-value-mad: 5.00
+
     login-protection:
       enabled: true
       max-failed-attempts: 5

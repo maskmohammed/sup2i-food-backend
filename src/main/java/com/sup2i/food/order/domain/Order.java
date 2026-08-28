@@ -389,7 +389,8 @@ public class Order {
         BigDecimal subtotal,
         BigDecimal taxTotal,
         BigDecimal discountTotal,
-        BigDecimal total
+        BigDecimal total,
+        UUID slotId
     ) {
         this.currency =
             currency;
@@ -408,6 +409,9 @@ public class Order {
 
         this.total =
             total;
+
+        this.slotId =
+            slotId;
     }
 
     public void markCreated() {

@@ -70,6 +70,7 @@ class OrderE2EIntegrationTest {
     private UUID organizationId;
     private UUID campusId;
     private UUID locationId;
+    private UUID timeSlotId;
 
     private Actor actor;
 
@@ -94,6 +95,12 @@ class OrderE2EIntegrationTest {
                 "SNACK",
                 "SNACK",
                 true
+            );
+
+        timeSlotId =
+            insertTimeSlot(
+                locationId,
+                1000
             );
 
         actor =
@@ -1996,6 +2003,7 @@ class OrderE2EIntegrationTest {
               "locationId": "%s",
               "currency": "MAD",
               "customerNote": "%s",
+              "timeSlotId": "%s",
               "items": [
                 {
                   "productId": "%s",
@@ -2008,6 +2016,7 @@ class OrderE2EIntegrationTest {
             """.formatted(
                 selectedLocationId,
                 note,
+                timeSlotId,
                 productId,
                 variant,
                 quantity
@@ -2027,6 +2036,7 @@ class OrderE2EIntegrationTest {
               "locationId": "%s",
               "currency": "MAD",
               "customerNote": "Atomic reservation",
+              "timeSlotId": "%s",
               "items": [
                 {
                   "productId": "%s",
@@ -2040,6 +2050,7 @@ class OrderE2EIntegrationTest {
             }
             """.formatted(
                 selectedLocationId,
+                timeSlotId,
                 productA,
                 quantityA,
                 productB,
@@ -2134,6 +2145,40 @@ class OrderE2EIntegrationTest {
             "L" + randomSuffix(),
             type,
             active
+        );
+
+        return id;
+    }
+
+    private UUID insertTimeSlot(
+        UUID selectedLocationId,
+        int capacity
+    ) {
+
+        UUID id =
+            UUID.randomUUID();
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO time_slots (
+                id,
+                location_id,
+                slot_date,
+                start_time,
+                end_time,
+                capacity,
+                reserved_count
+            )
+            VALUES (
+                ?, ?,
+                CURRENT_DATE + 1,
+                '12:00', '12:15',
+                ?, 0
+            )
+            """,
+            id,
+            selectedLocationId,
+            capacity
         );
 
         return id;

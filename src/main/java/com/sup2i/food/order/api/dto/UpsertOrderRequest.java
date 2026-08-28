@@ -26,6 +26,8 @@ public record UpsertOrderRequest(
     List<
         @Valid
         UpsertOrderItemRequest
-    > items
+    > items,
+
+    UUID timeSlotId
 ) {
 }

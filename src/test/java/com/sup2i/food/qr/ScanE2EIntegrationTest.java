@@ -71,6 +71,7 @@ class ScanE2EIntegrationTest {
     private UUID organizationId;
     private UUID campusId;
     private UUID locationId;
+    private UUID timeSlotId;
 
     private Actor actor;
 
@@ -95,6 +96,12 @@ class ScanE2EIntegrationTest {
                 "SNACK",
                 "SNACK",
                 true
+            );
+
+        timeSlotId =
+            insertTimeSlot(
+                locationId,
+                1000
             );
 
         actor =
@@ -448,6 +455,7 @@ class ScanE2EIntegrationTest {
                           "locationId": "%s",
                           "currency": "MAD",
                           "customerNote": "Scan E2E",
+                          "timeSlotId": "%s",
                           "items": [
                             {
                               "productId": "%s",
@@ -457,6 +465,7 @@ class ScanE2EIntegrationTest {
                         }
                         """.formatted(
                             locationId,
+                            timeSlotId,
                             productId,
                             quantity
                         )
@@ -633,6 +642,40 @@ class ScanE2EIntegrationTest {
             "L" + randomSuffix(),
             type,
             active
+        );
+
+        return id;
+    }
+
+    private UUID insertTimeSlot(
+        UUID selectedLocationId,
+        int capacity
+    ) {
+
+        UUID id =
+            UUID.randomUUID();
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO time_slots (
+                id,
+                location_id,
+                slot_date,
+                start_time,
+                end_time,
+                capacity,
+                reserved_count
+            )
+            VALUES (
+                ?, ?,
+                CURRENT_DATE + 1,
+                '12:00', '12:15',
+                ?, 0
+            )
+            """,
+            id,
+            selectedLocationId,
+            capacity
         );
 
         return id;

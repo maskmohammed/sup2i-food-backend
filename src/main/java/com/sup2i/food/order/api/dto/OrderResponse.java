@@ -15,6 +15,7 @@ public record OrderResponse(
     String orderNumber,
     UUID locationId,
     UUID studentId,
+    UUID timeSlotId,
     OrderSource source,
     OrderStatus status,
     OrderType orderType,

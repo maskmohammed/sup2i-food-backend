@@ -1,4 +1,4 @@
-package com.sup2i.food.kitchen;
+package com.sup2i.food.timeslot;
 
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
@@ -24,7 +24,13 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.net.InetAddress;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
-class KitchenE2EIntegrationTest {
+class TimeSlotE2EIntegrationTest {
 
     @Container
     @ServiceConnection
@@ -69,17 +75,16 @@ class KitchenE2EIntegrationTest {
     private UUID organizationId;
     private UUID campusId;
     private UUID locationId;
-    private UUID timeSlotId;
 
-    private Actor student;
-    private Actor cook;
+    private Actor studentA;
+    private Actor studentB;
 
     @BeforeEach
     void seedTenant() {
 
         organizationId =
             insertOrganization(
-                "KDS"
+                "SLOT"
             );
 
         campusId =
@@ -97,219 +102,317 @@ class KitchenE2EIntegrationTest {
                 true
             );
 
-        timeSlotId =
+        studentA =
+            insertActor(
+                organizationId,
+                campusId,
+                "STUA"
+            );
+
+        studentB =
+            insertActor(
+                organizationId,
+                campusId,
+                "STUB"
+            );
+    }
+
+    // =========================================================
+    // 01 - LISTING WITH REMAINING CAPACITY
+    // =========================================================
+
+    @Test
+    void listShowsAvailableSlotsWithRemainingCapacity()
+        throws Exception {
+
+        UUID slotId =
             insertTimeSlot(
                 locationId,
-                1000
+                "12:00",
+                "12:15",
+                5,
+                1
             );
 
-        student =
-            insertActor(
-                organizationId,
-                campusId,
-                "STUDENT",
-                true
-            );
-
-        cook =
-            insertActor(
-                organizationId,
-                campusId,
-                "COOK",
-                false
+        mockMvc.perform(
+                get(
+                    "/api/v1/time-slots"
+                )
+                    .param(
+                        "locationId",
+                        locationId.toString()
+                    )
+                    .param(
+                        "date",
+                        tomorrow()
+                    )
+                    .header(
+                        "Authorization",
+                        bearer(studentA)
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath(
+                    "$[?(@.id=='"
+                        + slotId
+                        + "')].capacity"
+                )
+                    .value(5)
+            )
+            .andExpect(
+                jsonPath(
+                    "$[?(@.id=='"
+                        + slotId
+                        + "')].reservedCount"
+                )
+                    .value(1)
+            )
+            .andExpect(
+                jsonPath(
+                    "$[?(@.id=='"
+                        + slotId
+                        + "')].remainingCapacity"
+                )
+                    .value(4)
+            )
+            .andExpect(
+                jsonPath(
+                    "$[?(@.id=='"
+                        + slotId
+                        + "')].status"
+                )
+                    .value("OPEN")
             );
     }
 
     // =========================================================
-    // 01 - TICKET CREATED AUTOMATICALLY AND ONLY ON PAY()
+    // 02 - RESERVATION DECREMENTS REMAINING CAPACITY
     // =========================================================
 
     @Test
-    void ticketCreatedAutomaticallyAndOnlyOnSuccessfulPay()
+    void reservingSlotDecrementsRemainingCapacity()
         throws Exception {
 
+        UUID slotId =
+            insertTimeSlot(
+                locationId,
+                "13:00",
+                "13:15",
+                3,
+                0
+            );
+
         UUID orderId =
-            awaitingPaymentOrder(
-                "AUTO",
-                2
+            createSubmittedOrder(
+                studentA,
+                slotId,
+                "DECR",
+                1
             );
 
         assertThat(
-            kitchenTicketCount(
-                orderId
+            slotRemainingCapacity(
+                slotId
             )
-        ).isZero();
+        ).isEqualTo(3);
 
-        pay(
+        beginPayment(
             orderId,
-            student
+            studentA
         )
             .andExpect(
                 status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.order.status")
-                    .value("QUEUED")
             );
 
         assertThat(
-            kitchenTicketCount(
-                orderId
+            slotRemainingCapacity(
+                slotId
             )
-        ).isEqualTo(1L);
+        ).isEqualTo(2);
 
         assertThat(
-            orderStatus(
+            slotReservedCount(
+                slotId
+            )
+        ).isEqualTo(1);
+
+        assertThat(
+            timeSlotReservationStatus(
                 orderId
             )
         ).isEqualTo(
-            "QUEUED"
+            "ACTIVE"
         );
-
-        UUID ticketId =
-            kitchenTicketId(
-                orderId
-            );
-
-        assertThat(
-            kitchenTicketStatus(
-                ticketId
-            )
-        ).isEqualTo(
-            "QUEUED"
-        );
-
-        assertThat(
-            kitchenTicketItemCount(
-                ticketId
-            )
-        ).isEqualTo(1L);
     }
 
     // =========================================================
-    // 02 - WORKFLOW PROGRESSES IN EXPECTED ORDER + ORDER SYNC
+    // 03 - CONCURRENT RESERVATIONS ON LAST SLOT
     // =========================================================
 
     @Test
-    void workflowProgressesInExpectedOrderAndSyncsOrder()
+    void concurrentReservationsOnLastSlotOnlyOneSucceeds()
         throws Exception {
 
-        UUID orderId =
-            paidOrder(
-                "FLOW",
+        UUID slotId =
+            insertTimeSlot(
+                locationId,
+                "14:00",
+                "14:15",
+                1,
+                0
+            );
+
+        UUID orderIdA =
+            createSubmittedOrder(
+                studentA,
+                slotId,
+                "RACEA",
                 1
             );
 
-        UUID ticketId =
-            kitchenTicketId(
-                orderId
+        UUID orderIdB =
+            createSubmittedOrder(
+                studentB,
+                slotId,
+                "RACEB",
+                1
             );
 
-        startPreparation(
-            ticketId,
-            cook
-        )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(false)
-            )
-            .andExpect(
-                jsonPath("$.ticket.status")
-                    .value("PREPARING")
-            );
+        ExecutorService executor =
+            Executors.newFixedThreadPool(2);
+
+        CountDownLatch ready =
+            new CountDownLatch(2);
+
+        CountDownLatch start =
+            new CountDownLatch(1);
+
+        Callable<Integer> attemptA =
+            () -> {
+                ready.countDown();
+                start.await();
+                return beginPayment(
+                    orderIdA,
+                    studentA
+                )
+                    .andReturn()
+                    .getResponse()
+                    .getStatus();
+            };
+
+        Callable<Integer> attemptB =
+            () -> {
+                ready.countDown();
+                start.await();
+                return beginPayment(
+                    orderIdB,
+                    studentB
+                )
+                    .andReturn()
+                    .getResponse()
+                    .getStatus();
+            };
+
+        Future<Integer> futureA =
+            executor.submit(attemptA);
+
+        Future<Integer> futureB =
+            executor.submit(attemptB);
+
+        ready.await();
+        start.countDown();
+
+        int statusA =
+            futureA.get();
+
+        int statusB =
+            futureB.get();
+
+        executor.shutdown();
 
         assertThat(
-            kitchenTicketStatus(
-                ticketId
-            )
-        ).isEqualTo(
-            "PREPARING"
+            List.of(statusA, statusB)
+        ).containsExactlyInAnyOrder(
+            200,
+            409
         );
 
         assertThat(
-            kitchenTicketAcceptedAt(
-                ticketId
+            slotReservedCount(
+                slotId
             )
-        ).isNotNull();
+        ).isEqualTo(1);
 
         assertThat(
-            kitchenTicketStartedAt(
-                ticketId
+            slotRemainingCapacity(
+                slotId
             )
-        ).isNotNull();
+        ).isEqualTo(0);
 
         assertThat(
-            orderStatus(
-                orderId
+            slotStatus(
+                slotId
             )
         ).isEqualTo(
-            "PREPARING"
+            "FULL"
         );
-
-        ready(
-            ticketId,
-            cook
-        )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(false)
-            )
-            .andExpect(
-                jsonPath("$.ticket.status")
-                    .value("READY")
-            );
-
-        assertThat(
-            kitchenTicketStatus(
-                ticketId
-            )
-        ).isEqualTo(
-            "READY"
-        );
-
-        assertThat(
-            orderStatus(
-                orderId
-            )
-        ).isEqualTo(
-            "READY"
-        );
-
-        assertThat(
-            orderReadyAt(
-                orderId
-            )
-        ).isNotNull();
     }
 
     // =========================================================
-    // 03 - SHORTCUT REJECTED (READY WITHOUT PREPARING)
+    // 04 - FULL SLOT REJECTED
     // =========================================================
 
     @Test
-    void readyDirectlyFromQueuedIsRejected()
+    void fullSlotIsRejectedCleanly()
         throws Exception {
 
-        UUID orderId =
-            paidOrder(
-                "SHORTCUT",
+        UUID slotId =
+            insertTimeSlot(
+                locationId,
+                "15:00",
+                "15:15",
+                1,
+                0
+            );
+
+        UUID orderIdA =
+            createSubmittedOrder(
+                studentA,
+                slotId,
+                "FULLA",
                 1
             );
 
-        UUID ticketId =
-            kitchenTicketId(
-                orderId
+        beginPayment(
+            orderIdA,
+            studentA
+        )
+            .andExpect(
+                status().isOk()
             );
 
-        ready(
-            ticketId,
-            cook
+        assertThat(
+            slotStatus(
+                slotId
+            )
+        ).isEqualTo(
+            "FULL"
+        );
+
+        UUID orderIdB =
+            createSubmittedOrder(
+                studentB,
+                slotId,
+                "FULLB",
+                1
+            );
+
+        beginPayment(
+            orderIdB,
+            studentB
         )
             .andExpect(
                 status().isConflict()
@@ -320,133 +423,75 @@ class KitchenE2EIntegrationTest {
             );
 
         assertThat(
-            kitchenTicketStatus(
-                ticketId
+            slotReservedCount(
+                slotId
             )
-        ).isEqualTo(
-            "QUEUED"
-        );
-
-        assertThat(
-            orderStatus(
-                orderId
-            )
-        ).isEqualTo(
-            "QUEUED"
-        );
+        ).isEqualTo(1);
     }
 
     // =========================================================
-    // 04 - IDEMPOTENCY
+    // 05 - PAST SLOT REJECTED
     // =========================================================
 
     @Test
-    void transitionsAreIdempotentOnReplay()
+    void pastSlotIsRejectedCleanly()
         throws Exception {
 
-        UUID orderId =
-            paidOrder(
-                "REPLAY",
-                1
+        UUID productId =
+            insertProduct(
+                organizationId,
+                "PAST",
+                "10.00"
             );
 
-        UUID ticketId =
-            kitchenTicketId(
-                orderId
+        UUID pastSlotId =
+            insertPastTimeSlot(
+                locationId,
+                5
             );
-
-        startPreparation(
-            ticketId,
-            cook
-        )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(false)
-            );
-
-        startPreparation(
-            ticketId,
-            cook
-        )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(true)
-            );
-
-        assertThat(
-            historyCount(
-                orderId
-            )
-        ).isEqualTo(6L);
-
-        ready(
-            ticketId,
-            cook
-        )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(false)
-            );
-
-        ready(
-            ticketId,
-            cook
-        )
-            .andExpect(
-                status().isOk()
-            )
-            .andExpect(
-                jsonPath("$.replayed")
-                    .value(true)
-            );
-
-        assertThat(
-            historyCount(
-                orderId
-            )
-        ).isEqualTo(7L);
-    }
-
-    // =========================================================
-    // 05 - QUEUE LISTING
-    // =========================================================
-
-    @Test
-    void queueListsActiveTicketsForOrganization()
-        throws Exception {
 
         UUID orderId =
-            paidOrder(
-                "QUEUE",
-                1
-            );
+            UUID.randomUUID();
 
         mockMvc.perform(
-                get(
-                    "/api/v1/kitchen/queue"
+                put(
+                    "/api/v1/orders/{orderId}",
+                    orderId
                 )
                     .header(
                         "Authorization",
-                        bearer(cook)
+                        bearer(studentA)
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "locationId": "%s",
+                          "currency": "MAD",
+                          "customerNote": "Past slot",
+                          "timeSlotId": "%s",
+                          "items": [
+                            {
+                              "productId": "%s",
+                              "quantity": 1
+                            }
+                          ]
+                        }
+                        """.formatted(
+                            locationId,
+                            pastSlotId,
+                            productId
+                        )
                     )
             )
             .andExpect(
-                status().isOk()
+                status().isConflict()
             )
             .andExpect(
-                jsonPath("$[?(@.orderId=='"
-                    + orderId
-                    + "')]")
-                    .exists()
+                jsonPath("$.code")
+                    .value("CONFLICT")
             );
     }
 
@@ -454,70 +499,9 @@ class KitchenE2EIntegrationTest {
     // HTTP HELPERS
     // =========================================================
 
-    private ResultActions pay(
-        UUID orderId,
-        Actor requestActor
-    ) throws Exception {
-
-        return mockMvc.perform(
-            post(
-                "/api/v1/orders/{orderId}/pay",
-                orderId
-            )
-                .header(
-                    "Authorization",
-                    bearer(requestActor)
-                )
-        );
-    }
-
-    private ResultActions startPreparation(
-        UUID ticketId,
-        Actor requestActor
-    ) throws Exception {
-
-        return mockMvc.perform(
-            post(
-                "/api/v1/kitchen/tickets/{ticketId}/start-preparation",
-                ticketId
-            )
-                .header(
-                    "Authorization",
-                    bearer(requestActor)
-                )
-        );
-    }
-
-    private ResultActions ready(
-        UUID ticketId,
-        Actor requestActor
-    ) throws Exception {
-
-        return mockMvc.perform(
-            post(
-                "/api/v1/kitchen/tickets/{ticketId}/ready",
-                ticketId
-            )
-                .header(
-                    "Authorization",
-                    bearer(requestActor)
-                )
-        );
-    }
-
-    private String bearer(
-        Actor requestActor
-    ) {
-
-        return "Bearer "
-            + requestActor.accessToken();
-    }
-
-    // =========================================================
-    // ORDER FIXTURES (draft -> submit -> begin-payment [-> pay])
-    // =========================================================
-
-    private UUID awaitingPaymentOrder(
+    private UUID createSubmittedOrder(
+        Actor requestActor,
+        UUID slotId,
         String prefix,
         int quantity
     ) throws Exception {
@@ -557,7 +541,7 @@ class KitchenE2EIntegrationTest {
                 )
                     .header(
                         "Authorization",
-                        bearer(student)
+                        bearer(requestActor)
                     )
                     .contentType(
                         MediaType.APPLICATION_JSON
@@ -567,7 +551,7 @@ class KitchenE2EIntegrationTest {
                         {
                           "locationId": "%s",
                           "currency": "MAD",
-                          "customerNote": "Kitchen E2E",
+                          "customerNote": "Time slot E2E",
                           "timeSlotId": "%s",
                           "items": [
                             {
@@ -578,7 +562,7 @@ class KitchenE2EIntegrationTest {
                         }
                         """.formatted(
                             locationId,
-                            timeSlotId,
+                            slotId,
                             productId,
                             quantity
                         )
@@ -595,21 +579,7 @@ class KitchenE2EIntegrationTest {
                 )
                     .header(
                         "Authorization",
-                        bearer(student)
-                    )
-            )
-            .andExpect(
-                status().isOk()
-            );
-
-        mockMvc.perform(
-                post(
-                    "/api/v1/orders/{orderId}/begin-payment",
-                    orderId
-                )
-                    .header(
-                        "Authorization",
-                        bearer(student)
+                        bearer(requestActor)
                     )
             )
             .andExpect(
@@ -619,26 +589,36 @@ class KitchenE2EIntegrationTest {
         return orderId;
     }
 
-    private UUID paidOrder(
-        String prefix,
-        int quantity
+    private ResultActions beginPayment(
+        UUID orderId,
+        Actor requestActor
     ) throws Exception {
 
-        UUID orderId =
-            awaitingPaymentOrder(
-                prefix,
-                quantity
-            );
+        return mockMvc.perform(
+            post(
+                "/api/v1/orders/{orderId}/begin-payment",
+                orderId
+            )
+                .header(
+                    "Authorization",
+                    bearer(requestActor)
+                )
+        );
+    }
 
-        pay(
-            orderId,
-            student
-        )
-            .andExpect(
-                status().isOk()
-            );
+    private String bearer(
+        Actor requestActor
+    ) {
 
-        return orderId;
+        return "Bearer "
+            + requestActor.accessToken();
+    }
+
+    private String tomorrow() {
+
+        return java.time.LocalDate.now()
+            .plusDays(1)
+            .toString();
     }
 
     // =========================================================
@@ -733,45 +713,10 @@ class KitchenE2EIntegrationTest {
         return id;
     }
 
-    private UUID insertTimeSlot(
-        UUID selectedLocationId,
-        int capacity
-    ) {
-
-        UUID id =
-            UUID.randomUUID();
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO time_slots (
-                id,
-                location_id,
-                slot_date,
-                start_time,
-                end_time,
-                capacity,
-                reserved_count
-            )
-            VALUES (
-                ?, ?,
-                CURRENT_DATE + 1,
-                '12:00', '12:15',
-                ?, 0
-            )
-            """,
-            id,
-            selectedLocationId,
-            capacity
-        );
-
-        return id;
-    }
-
     private Actor insertActor(
         UUID tenantId,
         UUID selectedCampusId,
-        String prefix,
-        boolean isStudent
+        String prefix
     ) {
 
         UUID userId =
@@ -781,7 +726,7 @@ class KitchenE2EIntegrationTest {
             randomSuffix();
 
         String email =
-            "kitchen-"
+            "slot-"
                 + prefix.toLowerCase()
                 + "-"
                 + suffix
@@ -802,32 +747,29 @@ class KitchenE2EIntegrationTest {
             userId,
             tenantId,
             email,
-            "Kitchen",
+            "Slot",
             prefix
         );
 
-        if (isStudent) {
+        UUID studentId =
+            UUID.randomUUID();
 
-            UUID studentId =
-                UUID.randomUUID();
-
-            jdbcTemplate.update(
-                """
-                INSERT INTO students (
-                    id,
-                    user_id,
-                    campus_id,
-                    student_number,
-                    enrollment_status
-                )
-                VALUES (?, ?, ?, ?, 'ACTIVE')
-                """,
-                studentId,
-                userId,
-                selectedCampusId,
-                "STU-" + randomSuffix()
-            );
-        }
+        jdbcTemplate.update(
+            """
+            INSERT INTO students (
+                id,
+                user_id,
+                campus_id,
+                student_number,
+                enrollment_status
+            )
+            VALUES (?, ?, ?, ?, 'ACTIVE')
+            """,
+            studentId,
+            userId,
+            selectedCampusId,
+            "STU-" + randomSuffix()
+        );
 
         User user =
             userRepository
@@ -837,7 +779,7 @@ class KitchenE2EIntegrationTest {
         AuthenticationTokens tokens =
             refreshTokenService.issue(
                 user,
-                "kitchen-e2e-"
+                "slot-e2e-"
                     + prefix,
                 InetAddress
                     .getLoopbackAddress()
@@ -993,141 +935,144 @@ class KitchenE2EIntegrationTest {
     }
 
     // =========================================================
+    // TIME SLOT FIXTURES
+    // =========================================================
+
+    private UUID insertTimeSlot(
+        UUID selectedLocationId,
+        String startTime,
+        String endTime,
+        int capacity,
+        int reservedCount
+    ) {
+
+        UUID id =
+            UUID.randomUUID();
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO time_slots (
+                id,
+                location_id,
+                slot_date,
+                start_time,
+                end_time,
+                capacity,
+                reserved_count
+            )
+            VALUES (
+                ?, ?,
+                CURRENT_DATE + 1,
+                ?::time, ?::time,
+                ?, ?
+            )
+            """,
+            id,
+            selectedLocationId,
+            startTime,
+            endTime,
+            capacity,
+            reservedCount
+        );
+
+        return id;
+    }
+
+    private UUID insertPastTimeSlot(
+        UUID selectedLocationId,
+        int capacity
+    ) {
+
+        UUID id =
+            UUID.randomUUID();
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO time_slots (
+                id,
+                location_id,
+                slot_date,
+                start_time,
+                end_time,
+                capacity,
+                reserved_count
+            )
+            VALUES (
+                ?, ?,
+                CURRENT_DATE - 1,
+                '12:00', '12:15',
+                ?, 0
+            )
+            """,
+            id,
+            selectedLocationId,
+            capacity
+        );
+
+        return id;
+    }
+
+    // =========================================================
     // DATABASE ASSERTION HELPERS
     // =========================================================
 
-    private String orderStatus(
+    private int slotReservedCount(
+        UUID slotId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT reserved_count
+            FROM time_slots
+            WHERE id = ?
+            """,
+            Integer.class,
+            slotId
+        );
+    }
+
+    private int slotRemainingCapacity(
+        UUID slotId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT capacity - reserved_count
+            FROM time_slots
+            WHERE id = ?
+            """,
+            Integer.class,
+            slotId
+        );
+    }
+
+    private String slotStatus(
+        UUID slotId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT status
+            FROM time_slots
+            WHERE id = ?
+            """,
+            String.class,
+            slotId
+        );
+    }
+
+    private String timeSlotReservationStatus(
         UUID orderId
     ) {
 
         return jdbcTemplate.queryForObject(
             """
             SELECT status
-            FROM orders
-            WHERE id = ?
+            FROM time_slot_reservations
+            WHERE order_id = ?
             """,
             String.class,
             orderId
-        );
-    }
-
-    private Object orderReadyAt(
-        UUID orderId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT ready_at
-            FROM orders
-            WHERE id = ?
-            """,
-            java.sql.Timestamp.class,
-            orderId
-        );
-    }
-
-    private Long historyCount(
-        UUID orderId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*)
-            FROM order_status_history
-            WHERE order_id = ?
-            """,
-            Long.class,
-            orderId
-        );
-    }
-
-    private Long kitchenTicketCount(
-        UUID orderId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*)
-            FROM kitchen_tickets
-            WHERE order_id = ?
-            """,
-            Long.class,
-            orderId
-        );
-    }
-
-    private UUID kitchenTicketId(
-        UUID orderId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT id
-            FROM kitchen_tickets
-            WHERE order_id = ?
-            """,
-            UUID.class,
-            orderId
-        );
-    }
-
-    private String kitchenTicketStatus(
-        UUID ticketId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT status
-            FROM kitchen_tickets
-            WHERE id = ?
-            """,
-            String.class,
-            ticketId
-        );
-    }
-
-    private Object kitchenTicketAcceptedAt(
-        UUID ticketId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT accepted_at
-            FROM kitchen_tickets
-            WHERE id = ?
-            """,
-            java.sql.Timestamp.class,
-            ticketId
-        );
-    }
-
-    private Object kitchenTicketStartedAt(
-        UUID ticketId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT started_at
-            FROM kitchen_tickets
-            WHERE id = ?
-            """,
-            java.sql.Timestamp.class,
-            ticketId
-        );
-    }
-
-    private Long kitchenTicketItemCount(
-        UUID ticketId
-    ) {
-
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*)
-            FROM kitchen_ticket_items
-            WHERE kitchen_ticket_id = ?
-            """,
-            Long.class,
-            ticketId
         );
     }
 

@@ -54,6 +54,8 @@ import com.sup2i.food.payment.domain.PaymentMethod;
 import com.sup2i.food.payment.service.PaymentService;
 import com.sup2i.food.qr.domain.QrCredentialType;
 import com.sup2i.food.qr.service.QrCredentialService;
+import com.sup2i.food.timeslot.domain.TimeSlot;
+import com.sup2i.food.timeslot.service.TimeSlotService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -70,6 +72,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -145,6 +148,7 @@ public class OrderService {
     private final PaymentService paymentService;
     private final QrCredentialService qrCredentialService;
     private final KitchenTicketService kitchenTicketService;
+    private final TimeSlotService timeSlotService;
 
     public OrderService(
         UserRepository userRepository,
@@ -166,7 +170,8 @@ public class OrderService {
         JdbcTemplate jdbcTemplate,
         PaymentService paymentService,
         QrCredentialService qrCredentialService,
-        KitchenTicketService kitchenTicketService
+        KitchenTicketService kitchenTicketService,
+        TimeSlotService timeSlotService
     ) {
         this.userRepository =
             userRepository;
@@ -227,6 +232,9 @@ public class OrderService {
 
         this.kitchenTicketService =
             kitchenTicketService;
+
+        this.timeSlotService =
+            timeSlotService;
     }
 
     @Transactional
@@ -381,7 +389,8 @@ public class OrderService {
             snapshot.taxTotal(),
             BigDecimal.ZERO
                 .setScale(2),
-            snapshot.total()
+            snapshot.total(),
+            snapshot.slotId()
         );
 
         try {
@@ -504,6 +513,22 @@ public class OrderService {
             validateStoredLine(item);
         }
 
+        if (
+            order.getSlotId()
+                == null
+        ) {
+            throw new OrderValidationException(
+                "Order must have a time slot selected."
+            );
+        }
+
+        timeSlotService
+            .validateSelectable(
+                order.getSlotId(),
+                order.getLocation()
+                    .getId()
+            );
+
         OrderStatus from =
             order.getStatus();
 
@@ -593,6 +618,10 @@ public class OrderService {
             items,
             context.actor(),
             expiresAt
+        );
+
+        timeSlotService.reserve(
+            order
         );
 
         OrderStatus from =
@@ -781,6 +810,11 @@ public class OrderService {
                     context.actor(),
                     false
                 );
+
+            timeSlotService.release(
+                order,
+                false
+            );
         }
 
         OffsetDateTime now =
@@ -870,6 +904,11 @@ public class OrderService {
                 context.actor(),
                 true
             );
+
+        timeSlotService.release(
+            order,
+            true
+        );
 
         OrderStatus from =
             order.getStatus();
@@ -1141,13 +1180,33 @@ public class OrderService {
         BigDecimal total =
             subtotal;
 
+        UUID slotId =
+            null;
+
+        if (
+            request.timeSlotId()
+                != null
+        ) {
+
+            TimeSlot slot =
+                timeSlotService
+                    .validateSelectable(
+                        request.timeSlotId(),
+                        request.locationId()
+                    );
+
+            slotId =
+                slot.getId();
+        }
+
         return new DraftSnapshot(
             currency,
             customerNote,
             subtotal,
             taxTotal,
             total,
-            List.copyOf(lines)
+            List.copyOf(lines),
+            slotId
         );
     }
 
@@ -1895,6 +1954,15 @@ public class OrderService {
         }
 
         if (
+            !Objects.equals(
+                order.getSlotId(),
+                snapshot.slotId()
+            )
+        ) {
+            return false;
+        }
+
+        if (
             order.getSubtotal()
                 .compareTo(
                     snapshot.subtotal()
@@ -2317,6 +2385,7 @@ public class OrderService {
                     : order
                         .getStudent()
                         .getId(),
+            order.getSlotId(),
             order.getSource(),
             order.getStatus(),
             order.getOrderType(),
@@ -2465,7 +2534,8 @@ public class OrderService {
         BigDecimal subtotal,
         BigDecimal taxTotal,
         BigDecimal total,
-        List<DraftLineSpec> lines
+        List<DraftLineSpec> lines,
+        UUID slotId
     ) {
     }
 

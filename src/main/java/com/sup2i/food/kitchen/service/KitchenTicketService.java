@@ -12,6 +12,7 @@ import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
 import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
 import com.sup2i.food.kitchen.repository.KitchenTicketItemRepository;
 import com.sup2i.food.kitchen.repository.KitchenTicketRepository;
+import com.sup2i.food.notification.service.NotificationService;
 import com.sup2i.food.order.domain.Order;
 import com.sup2i.food.order.domain.OrderItem;
 import com.sup2i.food.order.domain.OrderStatus;
@@ -38,6 +39,7 @@ public class KitchenTicketService {
     private final OrderRepository orderRepository;
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     public KitchenTicketService(
         KitchenTicketRepository kitchenTicketRepository,
@@ -45,7 +47,8 @@ public class KitchenTicketService {
         OrderItemRepository orderItemRepository,
         OrderRepository orderRepository,
         OrderStatusHistoryRepository orderStatusHistoryRepository,
-        UserRepository userRepository
+        UserRepository userRepository,
+        NotificationService notificationService
     ) {
         this.kitchenTicketRepository =
             kitchenTicketRepository;
@@ -64,6 +67,9 @@ public class KitchenTicketService {
 
         this.userRepository =
             userRepository;
+
+        this.notificationService =
+            notificationService;
     }
 
     @Transactional
@@ -370,6 +376,14 @@ public class KitchenTicketService {
 
         orderRepository
             .saveAndFlush(order);
+
+        if (
+            target
+                == OrderStatus.READY
+        ) {
+            notificationService
+                .notifyOrderReady(order);
+        }
     }
 
     private KitchenTicket ownedTicketForUpdate(

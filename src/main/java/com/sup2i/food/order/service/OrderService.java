@@ -26,6 +26,7 @@ import com.sup2i.food.inventory.repository.StockItemRepository;
 import com.sup2i.food.inventory.repository.StockLocationRepository;
 import com.sup2i.food.inventory.service.InventoryAlertService;
 import com.sup2i.food.kitchen.service.KitchenTicketService;
+import com.sup2i.food.notification.service.NotificationService;
 import com.sup2i.food.order.api.dto.OrderItemResponse;
 import com.sup2i.food.order.api.dto.OrderMutationResponse;
 import com.sup2i.food.order.api.dto.OrderResponse;
@@ -149,6 +150,7 @@ public class OrderService {
     private final QrCredentialService qrCredentialService;
     private final KitchenTicketService kitchenTicketService;
     private final TimeSlotService timeSlotService;
+    private final NotificationService notificationService;
 
     public OrderService(
         UserRepository userRepository,
@@ -171,7 +173,8 @@ public class OrderService {
         PaymentService paymentService,
         QrCredentialService qrCredentialService,
         KitchenTicketService kitchenTicketService,
-        TimeSlotService timeSlotService
+        TimeSlotService timeSlotService,
+        NotificationService notificationService
     ) {
         this.userRepository =
             userRepository;
@@ -235,6 +238,9 @@ public class OrderService {
 
         this.timeSlotService =
             timeSlotService;
+
+        this.notificationService =
+            notificationService;
     }
 
     @Transactional
@@ -748,6 +754,9 @@ public class OrderService {
 
         orderRepository
             .saveAndFlush(order);
+
+        notificationService
+            .notifyOrderQueued(order);
 
         return new OrderMutationResponse(
             response(order, null),

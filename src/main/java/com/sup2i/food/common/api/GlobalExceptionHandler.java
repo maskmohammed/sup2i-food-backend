@@ -35,6 +35,7 @@ import com.sup2i.food.qr.exception.QrNotFoundException;
 import com.sup2i.food.qr.exception.QrRevokedException;
 import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
 import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
+import com.sup2i.food.notification.exception.NotificationNotFoundException;
 import com.sup2i.food.timeslot.exception.TimeSlotConflictException;
 import com.sup2i.food.timeslot.exception.TimeSlotNotFoundException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -309,6 +310,24 @@ public class GlobalExceptionHandler {
         return error(
             HttpStatus.CONFLICT,
             "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        NotificationNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        notificationNotFound(
+            NotificationNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
             exception.getMessage(),
             request,
             Map.of()

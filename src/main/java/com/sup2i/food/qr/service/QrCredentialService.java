@@ -41,6 +41,20 @@ public class QrCredentialService {
         OffsetDateTime expiresAt
     ) {
 
+        return issueDetailed(
+            credentialType,
+            subjectId,
+            expiresAt
+        ).rawToken();
+    }
+
+    @Transactional
+    public IssuedCredential issueDetailed(
+        QrCredentialType credentialType,
+        UUID subjectId,
+        OffsetDateTime expiresAt
+    ) {
+
         TokenHashService.GeneratedToken generated =
             tokenHashService.generate();
 
@@ -65,7 +79,10 @@ public class QrCredentialService {
             );
         }
 
-        return generated.rawToken();
+        return new IssuedCredential(
+            credential.getId(),
+            generated.rawToken()
+        );
     }
 
     @Transactional
@@ -155,6 +172,12 @@ public class QrCredentialService {
     public record ResolvedCredential(
         QrCredentialType credentialType,
         UUID subjectId
+    ) {
+    }
+
+    public record IssuedCredential(
+        UUID credentialId,
+        String rawToken
     ) {
     }
 }

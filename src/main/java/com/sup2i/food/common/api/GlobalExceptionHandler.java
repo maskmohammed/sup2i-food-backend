@@ -39,6 +39,9 @@ import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
 import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
 import com.sup2i.food.notification.exception.NotificationNotFoundException;
 import com.sup2i.food.security.exception.PasswordResetTokenInvalidException;
+import com.sup2i.food.subscription.exception.SubscriptionConflictException;
+import com.sup2i.food.subscription.exception.SubscriptionNotFoundException;
+import com.sup2i.food.subscription.exception.SubscriptionValidationException;
 import com.sup2i.food.timeslot.exception.TimeSlotConflictException;
 import com.sup2i.food.timeslot.exception.TimeSlotNotFoundException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -307,6 +310,60 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse>
         timeSlotConflict(
             TimeSlotConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SubscriptionValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        subscriptionValidation(
+            SubscriptionValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SubscriptionNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        subscriptionNotFound(
+            SubscriptionNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SubscriptionConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        subscriptionConflict(
+            SubscriptionConflictException exception,
             HttpServletRequest request
         ) {
 

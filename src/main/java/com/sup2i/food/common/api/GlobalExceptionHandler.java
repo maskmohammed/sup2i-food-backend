@@ -60,6 +60,15 @@ import com.sup2i.food.subscription.exception.SubscriptionNotFoundException;
 import com.sup2i.food.subscription.exception.SubscriptionValidationException;
 import com.sup2i.food.timeslot.exception.TimeSlotConflictException;
 import com.sup2i.food.timeslot.exception.TimeSlotNotFoundException;
+import com.sup2i.food.procurement.exception.SupplierConflictException;
+import com.sup2i.food.procurement.exception.SupplierNotFoundException;
+import com.sup2i.food.procurement.exception.SupplierValidationException;
+import com.sup2i.food.purchase.exception.PurchaseConflictException;
+import com.sup2i.food.purchase.exception.PurchaseNotFoundException;
+import com.sup2i.food.purchase.exception.PurchaseValidationException;
+import com.sup2i.food.waste.exception.WasteConflictException;
+import com.sup2i.food.waste.exception.WasteNotFoundException;
+import com.sup2i.food.waste.exception.WasteValidationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -865,6 +874,168 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse>
         menuVoteConflict(
             MenuVoteConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SupplierValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        supplierValidation(
+            SupplierValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SupplierNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        supplierNotFound(
+            SupplierNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SupplierConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        supplierConflict(
+            SupplierConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PurchaseValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        purchaseValidation(
+            PurchaseValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PurchaseNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        purchaseNotFound(
+            PurchaseNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PurchaseConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        purchaseConflict(
+            PurchaseConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        WasteValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        wasteValidation(
+            WasteValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        WasteNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        wasteNotFound(
+            WasteNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        WasteConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        wasteConflict(
+            WasteConflictException exception,
             HttpServletRequest request
         ) {
 

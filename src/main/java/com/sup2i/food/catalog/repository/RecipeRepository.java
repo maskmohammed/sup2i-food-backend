@@ -30,6 +30,19 @@ public interface RecipeRepository
     );
 
     @Query("""
+        select r
+        from Recipe r
+        where r.id = :recipeId
+          and r.product.organization.id = :organizationId
+        """)
+    Optional<Recipe> findByIdAndProduct_Organization_Id(
+        @Param("recipeId")
+        UUID recipeId,
+        @Param("organizationId")
+        UUID organizationId
+    );
+
+    @Query("""
         select max(r.version)
         from Recipe r
         where r.product.id = :productId

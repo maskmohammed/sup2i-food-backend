@@ -3,6 +3,8 @@ package com.sup2i.food.procurement.domain;
 import com.sup2i.food.organization.domain.Organization;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -57,6 +59,21 @@ public class Supplier {
     private String address;
 
     @Column(
+        name = "contact",
+        length = 120
+    )
+    private String contact;
+
+    @Enumerated(EnumType.STRING)
+    @Column(
+        name = "status",
+        nullable = false,
+        length = 20
+    )
+    private SupplierStatus status =
+        SupplierStatus.ACTIVE;
+
+    @Column(
         name = "is_active",
         nullable = false
     )
@@ -78,6 +95,35 @@ public class Supplier {
     private OffsetDateTime updatedAt;
 
     protected Supplier() {
+    }
+
+    public Supplier(
+        Organization organization,
+        String name,
+        String phone,
+        String email,
+        String address,
+        String contact,
+        SupplierStatus status
+    ) {
+        this.organization =
+            organization;
+
+        this.name = name;
+
+        this.phone = phone;
+
+        this.email = email;
+
+        this.address = address;
+
+        this.contact = contact;
+
+        this.status = status;
+
+        this.active =
+            status
+                == SupplierStatus.ACTIVE;
     }
 
     public UUID getId() {
@@ -104,8 +150,44 @@ public class Supplier {
         return address;
     }
 
+    public String getContact() {
+        return contact;
+    }
+
+    public SupplierStatus getStatus() {
+        return status;
+    }
+
     public boolean isActive() {
         return active;
+    }
+
+    public void update(
+        String name,
+        String phone,
+        String email,
+        String address,
+        String contact
+    ) {
+        this.name = name;
+
+        this.phone = phone;
+
+        this.email = email;
+
+        this.address = address;
+
+        this.contact = contact;
+    }
+
+    public void setStatus(
+        SupplierStatus status
+    ) {
+        this.status = status;
+
+        this.active =
+            status
+                == SupplierStatus.ACTIVE;
     }
 
     public OffsetDateTime getCreatedAt() {

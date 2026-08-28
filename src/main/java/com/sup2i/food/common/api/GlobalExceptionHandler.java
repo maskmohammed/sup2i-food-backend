@@ -42,6 +42,15 @@ import com.sup2i.food.qr.exception.QrConflictException;
 import com.sup2i.food.qr.exception.QrExpiredException;
 import com.sup2i.food.qr.exception.QrNotFoundException;
 import com.sup2i.food.qr.exception.QrRevokedException;
+import com.sup2i.food.review.exception.ReviewConflictException;
+import com.sup2i.food.review.exception.ReviewNotFoundException;
+import com.sup2i.food.review.exception.ReviewValidationException;
+import com.sup2i.food.survey.exception.SurveyConflictException;
+import com.sup2i.food.survey.exception.SurveyNotFoundException;
+import com.sup2i.food.survey.exception.SurveyValidationException;
+import com.sup2i.food.menuvote.exception.MenuVoteConflictException;
+import com.sup2i.food.menuvote.exception.MenuVoteNotFoundException;
+import com.sup2i.food.menuvote.exception.MenuVoteValidationException;
 import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
 import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
 import com.sup2i.food.notification.exception.NotificationNotFoundException;
@@ -700,6 +709,168 @@ public class GlobalExceptionHandler {
         return error(
             HttpStatus.UNPROCESSABLE_CONTENT,
             "PRODUCT_UNAVAILABLE",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        ReviewValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        reviewValidation(
+            ReviewValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        ReviewNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        reviewNotFound(
+            ReviewNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        ReviewConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        reviewConflict(
+            ReviewConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SurveyValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        surveyValidation(
+            SurveyValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SurveyNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        surveyNotFound(
+            SurveyNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        SurveyConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        surveyConflict(
+            SurveyConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        MenuVoteValidationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        menuVoteValidation(
+            MenuVoteValidationException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        MenuVoteNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        menuVoteNotFound(
+            MenuVoteNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        MenuVoteConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        menuVoteConflict(
+            MenuVoteConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
             exception.getMessage(),
             request,
             Map.of()

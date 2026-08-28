@@ -210,6 +210,29 @@ public class RefreshTokenService {
             });
     }
 
+    /*
+     * Révoque toutes les sessions actives d'un utilisateur.
+     * Utilisé après un changement de mot de passe (reset), en plus
+     * du cas interne de réutilisation de refresh token détectée.
+     */
+    @Transactional
+    public void revokeAllForUser(
+        UUID userId
+    ) {
+        List<RefreshToken> tokens =
+            repository
+                .findAllByUserIdAndRevokedAtIsNull(
+                    userId
+                );
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        tokens.forEach(
+            token -> token.revoke(now)
+        );
+    }
+
     private void revokeAll(
         User user,
         OffsetDateTime revokedAt

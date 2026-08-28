@@ -19,6 +19,8 @@ import com.sup2i.food.catalog.exception.CatalogConflictException;
 import com.sup2i.food.catalog.exception.CatalogNotFoundException;
 import com.sup2i.food.catalog.exception.CatalogValidationException;
 import com.sup2i.food.catalog.exception.ProductUnavailableException;
+import com.sup2i.food.identity.exception.RoleNotFoundException;
+import com.sup2i.food.identity.exception.UserNotFoundException;
 import com.sup2i.food.inventory.exception.InventoryConflictException;
 import com.sup2i.food.inventory.exception.InventoryNotFoundException;
 import com.sup2i.food.inventory.exception.InventoryValidationException;
@@ -36,6 +38,7 @@ import com.sup2i.food.qr.exception.QrRevokedException;
 import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
 import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
 import com.sup2i.food.notification.exception.NotificationNotFoundException;
+import com.sup2i.food.security.exception.PasswordResetTokenInvalidException;
 import com.sup2i.food.timeslot.exception.TimeSlotConflictException;
 import com.sup2i.food.timeslot.exception.TimeSlotNotFoundException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -310,6 +313,60 @@ public class GlobalExceptionHandler {
         return error(
             HttpStatus.CONFLICT,
             "CONFLICT",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        UserNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        userNotFound(
+            UserNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        RoleNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        roleNotFound(
+            RoleNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PasswordResetTokenInvalidException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        passwordResetTokenInvalid(
+            PasswordResetTokenInvalidException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
             exception.getMessage(),
             request,
             Map.of()

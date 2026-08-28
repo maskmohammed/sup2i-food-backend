@@ -1,16 +1,20 @@
 package com.sup2i.food.security.api;
 
 import com.sup2i.food.security.api.dto.AuthResponse;
+import com.sup2i.food.security.api.dto.ForgotPasswordRequest;
+import com.sup2i.food.security.api.dto.ForgotPasswordResponse;
 import com.sup2i.food.security.api.dto.LoginRequest;
 import com.sup2i.food.security.api.dto.MfaTotpConfirmRequest;
 import com.sup2i.food.security.api.dto.MfaTotpConfirmResponse;
 import com.sup2i.food.security.api.dto.MfaTotpSetupRequest;
 import com.sup2i.food.security.api.dto.MfaTotpSetupResponse;
 import com.sup2i.food.security.api.dto.RefreshRequest;
+import com.sup2i.food.security.api.dto.ResetPasswordRequest;
 import com.sup2i.food.security.service.AuthResponseService;
 import com.sup2i.food.security.service.AuthenticationTokens;
 import com.sup2i.food.security.service.LocalAuthenticationService;
 import com.sup2i.food.security.service.MfaEnrollmentService;
+import com.sup2i.food.security.service.PasswordResetService;
 import com.sup2i.food.security.service.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -38,17 +42,47 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final AuthResponseService responseService;
     private final MfaEnrollmentService mfaEnrollmentService;
+    private final PasswordResetService passwordResetService;
 
     public AuthController(
         LocalAuthenticationService authenticationService,
         RefreshTokenService refreshTokenService,
         AuthResponseService responseService,
-        MfaEnrollmentService mfaEnrollmentService
+        MfaEnrollmentService mfaEnrollmentService,
+        PasswordResetService passwordResetService
     ) {
         this.authenticationService = authenticationService;
         this.refreshTokenService = refreshTokenService;
         this.responseService = responseService;
         this.mfaEnrollmentService = mfaEnrollmentService;
+        this.passwordResetService = passwordResetService;
+    }
+
+    @PostMapping("/forgot-password")
+    public ForgotPasswordResponse forgotPassword(
+        @Valid
+        @RequestBody
+        ForgotPasswordRequest request
+    ) {
+
+        return passwordResetService.requestReset(
+            request.email()
+        );
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(
+        @Valid
+        @RequestBody
+        ResetPasswordRequest request
+    ) {
+
+        passwordResetService.resetPassword(
+            request.token(),
+            request.newPassword()
+        );
+
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/login")

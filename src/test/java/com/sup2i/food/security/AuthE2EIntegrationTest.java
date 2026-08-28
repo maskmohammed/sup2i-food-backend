@@ -1,6 +1,7 @@
 package com.sup2i.food.security;
 
 import com.sup2i.food.security.api.dto.AuthResponse;
+import com.sup2i.food.security.api.dto.ForgotPasswordResponse;
 import com.sup2i.food.security.api.dto.MfaTotpSetupResponse;
 import com.sup2i.food.security.service.Base32Codec;
 import com.sup2i.food.security.service.TokenHashService;
@@ -1618,6 +1619,306 @@ void tooManyFailedLoginsAreRateLimited()
 
         assertThat(failures)
             .isEqualTo(1L);
+    }
+
+    @Test
+    void forgotPasswordThenResetPasswordChangesCredential()
+        throws Exception {
+
+        String newPassword =
+            "NewSup2iE2E!2026";
+
+        String resetToken =
+            forgotPassword(EMAIL);
+
+        assertThat(resetToken)
+            .isNotBlank();
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/reset-password"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "token",
+                                resetToken,
+                                "newPassword",
+                                newPassword
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isNoContent()
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/login"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "email",
+                                EMAIL,
+                                "password",
+                                PASSWORD
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            );
+
+        AuthResponse afterReset =
+            login(newPassword);
+
+        assertThat(
+            afterReset.accessToken()
+        ).isNotBlank();
+    }
+
+    @Test
+    void resetPasswordRevokesExistingSessions()
+        throws Exception {
+
+        AuthResponse before =
+            login(PASSWORD);
+
+        String resetToken =
+            forgotPassword(EMAIL);
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/reset-password"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "token",
+                                resetToken,
+                                "newPassword",
+                                "AnotherNewPass!2026"
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isNoContent()
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/refresh"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "refreshToken",
+                                before.refreshToken()
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isUnauthorized()
+            );
+    }
+
+    @Test
+    void resetPasswordRejectsExpiredToken()
+        throws Exception {
+
+        String resetToken =
+            forgotPassword(EMAIL);
+
+        jdbcTemplate.update(
+            """
+            UPDATE password_reset_tokens
+            SET expires_at =
+                issued_at + INTERVAL '1 second'
+            WHERE user_id = (
+                SELECT id FROM users WHERE email = ?
+            )
+            """,
+            EMAIL
+        );
+
+        Thread.sleep(1100);
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/reset-password"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "token",
+                                resetToken,
+                                "newPassword",
+                                "IrrelevantPass!2026"
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+    }
+
+    @Test
+    void resetPasswordRejectsAlreadyUsedToken()
+        throws Exception {
+
+        String resetToken =
+            forgotPassword(EMAIL);
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/reset-password"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "token",
+                                resetToken,
+                                "newPassword",
+                                "FirstUsePass!2026"
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isNoContent()
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/auth/reset-password"
+                )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        json(
+                            Map.of(
+                                "token",
+                                resetToken,
+                                "newPassword",
+                                "SecondUsePass!2026"
+                            )
+                        )
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+    }
+
+    @Test
+    void forgotPasswordForUnknownEmailReturnsGenericResponse()
+        throws Exception {
+
+        MvcResult result =
+            mockMvc.perform(
+                    post(
+                        "/api/v1/auth/forgot-password"
+                    )
+                        .contentType(
+                            MediaType.APPLICATION_JSON
+                        )
+                        .content(
+                            json(
+                                Map.of(
+                                    "email",
+                                    "no-such-user@sup2i.test"
+                                )
+                            )
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andReturn();
+
+        ForgotPasswordResponse response =
+            jsonMapper.readValue(
+                result.getResponse()
+                    .getContentAsString(),
+                ForgotPasswordResponse.class
+            );
+
+        assertThat(
+            response.message()
+        ).isNotBlank();
+
+        assertThat(
+            response.devResetToken()
+        ).isNull();
+    }
+
+    private String forgotPassword(
+        String email
+    ) throws Exception {
+
+        MvcResult result =
+            mockMvc.perform(
+                    post(
+                        "/api/v1/auth/forgot-password"
+                    )
+                        .contentType(
+                            MediaType.APPLICATION_JSON
+                        )
+                        .content(
+                            json(
+                                Map.of(
+                                    "email",
+                                    email
+                                )
+                            )
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andReturn();
+
+        ForgotPasswordResponse response =
+            jsonMapper.readValue(
+                result.getResponse()
+                    .getContentAsString(),
+                ForgotPasswordResponse.class
+            );
+
+        return response.devResetToken();
     }
 
     private AuthResponse login(

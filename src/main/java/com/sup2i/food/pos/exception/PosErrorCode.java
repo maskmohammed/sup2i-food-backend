@@ -1,0 +1,9 @@
+package com.sup2i.food.pos.exception;
+
+public enum PosErrorCode {
+    RESOURCE_NOT_FOUND,
+    POS_SESSION_ALREADY_OPEN,
+    POS_SESSION_NOT_OPEN,
+    CASH_DIFFERENCE_REASON_REQUIRED,
+    IDEMPOTENCY_CONFLICT
+}

@@ -7,14 +7,19 @@ import com.sup2i.food.security.exception.MfaAlreadyConfiguredException;
 import com.sup2i.food.security.exception.MfaRequiredException;
 import com.sup2i.food.security.exception.MfaSetupRequiredException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.CredentialsExpiredException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import com.sup2i.food.catalog.exception.CatalogConflictException;
 import com.sup2i.food.catalog.exception.CatalogNotFoundException;
 import com.sup2i.food.catalog.exception.CatalogValidationException;
@@ -29,6 +34,9 @@ import com.sup2i.food.payment.exception.PaymentConflictException;
 import com.sup2i.food.payment.exception.PaymentErrorCode;
 import com.sup2i.food.payment.exception.PaymentNotFoundException;
 import com.sup2i.food.payment.exception.PaymentValidationException;
+import com.sup2i.food.kitchen.exception.KitchenConflictException;
+import com.sup2i.food.kitchen.exception.KitchenErrorCode;
+import com.sup2i.food.kitchen.exception.KitchenNotFoundException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -164,6 +172,47 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(
+        KitchenNotFoundException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        kitchenNotFound(
+            KitchenNotFoundException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.NOT_FOUND,
+            kitchenCode(
+                exception.getErrorCode(),
+                "KITCHEN_TICKET_NOT_FOUND"
+            ),
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        KitchenConflictException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        kitchenConflict(
+            KitchenConflictException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.CONFLICT,
+            kitchenCode(
+                exception.getErrorCode(),
+                "CONFLICT"
+            ),
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
     @ExceptionHandler(
         InventoryValidationException.class
     )
@@ -307,6 +356,27 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler({
+        ConstraintViolationException.class,
+        HandlerMethodValidationException.class,
+        MissingRequestHeaderException.class,
+        MissingServletRequestParameterException.class,
+        MethodArgumentTypeMismatchException.class
+    })
+    public ResponseEntity<ApiErrorResponse>
+        requestParameterValidation(
+            Exception exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            "Request validation failed.",
+            request,
+            Map.of()
+        );
+    }
     @ExceptionHandler(
         MethodArgumentNotValidException.class
     )
@@ -495,6 +565,17 @@ public class GlobalExceptionHandler {
         );
     }
 
+    private String kitchenCode(
+        KitchenErrorCode errorCode,
+        String fallback
+    ) {
+
+        if (errorCode == null) {
+            return fallback;
+        }
+
+        return errorCode.name();
+    }
     private HttpStatus paymentHttpStatus(
         PaymentErrorCode errorCode,
         HttpStatus fallback

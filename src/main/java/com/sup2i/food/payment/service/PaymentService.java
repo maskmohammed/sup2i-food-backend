@@ -34,6 +34,7 @@ import com.sup2i.food.payment.exception.PaymentConflictException;
 import com.sup2i.food.payment.exception.PaymentValidationException;
 import com.sup2i.food.payment.repository.PaymentEventRepository;
 import com.sup2i.food.payment.repository.PaymentRepository;
+import com.sup2i.food.payment.service.port.PaidOrderKitchenQueue;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -95,6 +96,9 @@ public class PaymentService {
     private final InventoryAlertService
         inventoryAlertService;
 
+    private final PaidOrderKitchenQueue
+        paidOrderKitchenQueue;
+
     private final JdbcTemplate jdbcTemplate;
 
     public PaymentService(
@@ -118,6 +122,8 @@ public class PaymentService {
             paymentEventRepository,
         InventoryAlertService
             inventoryAlertService,
+        PaidOrderKitchenQueue
+            paidOrderKitchenQueue,
         JdbcTemplate jdbcTemplate
     ) {
         this.userRepository =
@@ -152,6 +158,9 @@ public class PaymentService {
 
         this.inventoryAlertService =
             inventoryAlertService;
+
+        this.paidOrderKitchenQueue =
+            paidOrderKitchenQueue;
 
         this.jdbcTemplate =
             jdbcTemplate;
@@ -360,6 +369,24 @@ public class PaymentService {
                     organizationId
                 );
         }
+
+        /*
+         * A fresh completed payment must become operationally
+         * visible to Kitchen in the SAME transaction.
+         *
+         * The payment side depends only on its narrow port.
+         * The Kitchen adapter joins this transaction with
+         * Propagation.MANDATORY.
+         *
+         * Any routing/ticket failure therefore rolls back:
+         * payment, payment event, PAID history, stock effects,
+         * and the attempted Kitchen queue transition together.
+         */
+        paidOrderKitchenQueue.enqueuePaidOrder(
+            organizationId,
+            order.getId(),
+            now
+        );
 
         return result(
             payment,
@@ -705,14 +732,6 @@ public class PaymentService {
             );
         }
 
-        if (
-            existingOrder.getStatus()
-                != OrderStatus.PAID
-        ) {
-            throw new PaymentConflictException(
-                "Completed payment is not synchronized with order status."
-            );
-        }
 
         if (
             existingOrder.getPaymentStatus()

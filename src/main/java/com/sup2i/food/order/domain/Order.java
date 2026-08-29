@@ -452,6 +452,56 @@ public class Order {
             at;
     }
 
+    public void markQueued() {
+
+        if (
+            status
+                != OrderStatus.PAID
+        ) {
+            throw new IllegalStateException(
+                "Only a paid order can be queued."
+            );
+        }
+
+        status =
+            OrderStatus.QUEUED;
+    }
+
+    public void markPreparing() {
+
+        if (
+            status
+                != OrderStatus.QUEUED
+        ) {
+            throw new IllegalStateException(
+                "Only a queued order can start preparation."
+            );
+        }
+
+        status =
+            OrderStatus.PREPARING;
+    }
+
+    public void markReady(
+        OffsetDateTime at
+    ) {
+
+        if (
+            status
+                != OrderStatus.PREPARING
+        ) {
+            throw new IllegalStateException(
+                "Only a preparing order can become ready."
+            );
+        }
+
+        status =
+            OrderStatus.READY;
+
+        readyAt =
+            at;
+    }
+
     public void markCancelled(
         OffsetDateTime at
     ) {

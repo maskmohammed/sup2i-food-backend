@@ -1,5 +1,7 @@
 package com.sup2i.food.payment;
 
+import com.sup2i.food.payment.service.port.PaidOrderKitchenQueue;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
 import com.sup2i.food.payment.domain.PaymentMethod;
@@ -57,6 +59,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Testcontainers
 class PaymentE2EIntegrationTest {
+    /*
+     * Payment vertical tests keep Kitchen behind the payment-owned
+     * port. Real Payment -> Kitchen integration is proven separately
+     * by PaymentKitchenIntegrationE2ETest.
+     */
+    @MockitoBean
+    private PaidOrderKitchenQueue paidOrderKitchenQueue;
 
     @Container
     @ServiceConnection

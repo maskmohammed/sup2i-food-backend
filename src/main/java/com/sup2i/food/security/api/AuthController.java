@@ -86,7 +86,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponse login(
+    public ResponseEntity<AuthResponse> login(
         @Valid @RequestBody LoginRequest request,
         HttpServletRequest httpRequest,
         @RequestHeader(
@@ -109,11 +109,13 @@ public class AuthController {
                 userAgent
             );
 
-        return responseService.create(tokens);
+        return noStore(
+            responseService.create(tokens)
+        );
     }
 
     @PostMapping("/refresh")
-    public AuthResponse refresh(
+    public ResponseEntity<AuthResponse> refresh(
         @Valid @RequestBody RefreshRequest request,
         HttpServletRequest httpRequest,
         @RequestHeader(
@@ -128,7 +130,21 @@ public class AuthController {
                 resolveIp(httpRequest)
             );
 
-        return responseService.create(tokens);
+        return noStore(
+            responseService.create(tokens)
+        );
+    }
+
+    private ResponseEntity<AuthResponse> noStore(
+        AuthResponse body
+    ) {
+        return ResponseEntity
+            .ok()
+            .header(
+                "Cache-Control",
+                "no-store"
+            )
+            .body(body);
     }
 
     @PostMapping("/logout")

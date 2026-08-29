@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <springProperty
+        scope="context"
+        name="appName"
+        source="spring.application.name"
+        defaultValue="sup2i-food-backend"
+    />
+
+    <springProfile name="!prod">
+
+        <appender
+            name="CONSOLE"
+            class="ch.qos.logback.core.ConsoleAppender"
+        >
+            <encoder>
+                <pattern>
+                    %d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] traceId=%X{traceId:-} %logger{40} - %msg%n
+                </pattern>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+
+    </springProfile>
+
+    <springProfile name="prod">
+
+        <!--
+          Journalisation structurée JSON (prête pour ingestion
+          Sentry / Datadog / ELK). Le traceId (MDC) est inclus.
+        -->
+        <appender
+            name="JSON"
+            class="ch.qos.logback.core.ConsoleAppender"
+        >
+            <encoder
+                class="net.logstash.logback.encoder.LogstashEncoder"
+            >
+                <includeMdc>true</includeMdc>
+                <customFields>
+                    {"service":"${appName}"}
+                </customFields>
+            </encoder>
+        </appender>
+
+        <logger
+            name="org.hibernate.SQL"
+            level="WARN"
+        />
+        <logger
+            name="org.springframework.security"
+            level="WARN"
+        />
+
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+
+    </springProfile>
+
+</configuration>

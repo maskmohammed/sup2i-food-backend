@@ -1,5 +1,6 @@
 package com.sup2i.food.identity.service;
 
+import com.sup2i.food.audit.service.AuditLogService;
 import com.sup2i.food.catalog.api.dto.PageResponse;
 import com.sup2i.food.identity.api.dto.AdminUserMutationResponse;
 import com.sup2i.food.identity.api.dto.AdminUserResponse;
@@ -34,11 +35,13 @@ public class AdminUserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
+    private final AuditLogService auditLogService;
 
     public AdminUserService(
         UserRepository userRepository,
         RoleRepository roleRepository,
-        UserRoleRepository userRoleRepository
+        UserRoleRepository userRoleRepository,
+        AuditLogService auditLogService
     ) {
         this.userRepository =
             userRepository;
@@ -48,6 +51,9 @@ public class AdminUserService {
 
         this.userRoleRepository =
             userRoleRepository;
+
+        this.auditLogService =
+            auditLogService;
     }
 
     @Transactional(readOnly = true)
@@ -144,6 +150,23 @@ public class AdminUserService {
             target
         );
 
+        auditLogService.record(
+            actor.getOrganization().getId(),
+            actor.getId(),
+            "USER_ACTIVATED",
+            "USER",
+            target.getId(),
+            java.util.Map.of(
+                "status",
+                UserStatus.SUSPENDED.name()
+            ),
+            java.util.Map.of(
+                "status",
+                UserStatus.ACTIVE.name()
+            ),
+            null
+        );
+
         return new AdminUserMutationResponse(
             toResponse(target),
             false
@@ -181,6 +204,23 @@ public class AdminUserService {
 
         userRepository.saveAndFlush(
             target
+        );
+
+        auditLogService.record(
+            actor.getOrganization().getId(),
+            actor.getId(),
+            "USER_DEACTIVATED",
+            "USER",
+            target.getId(),
+            java.util.Map.of(
+                "status",
+                UserStatus.ACTIVE.name()
+            ),
+            java.util.Map.of(
+                "status",
+                UserStatus.SUSPENDED.name()
+            ),
+            null
         );
 
         return new AdminUserMutationResponse(
@@ -239,6 +279,20 @@ public class AdminUserService {
         userRoleRepository
             .saveAndFlush(assignment);
 
+        auditLogService.record(
+            actor.getOrganization().getId(),
+            actor.getId(),
+            "ROLE_ASSIGNED",
+            "USER",
+            target.getId(),
+            java.util.Map.of(),
+            java.util.Map.of(
+                "role",
+                role.getCode()
+            ),
+            null
+        );
+
         return new AdminUserMutationResponse(
             toResponse(target),
             false
@@ -281,6 +335,20 @@ public class AdminUserService {
         );
 
         userRoleRepository.flush();
+
+        auditLogService.record(
+            actor.getOrganization().getId(),
+            actor.getId(),
+            "ROLE_REVOKED",
+            "USER",
+            target.getId(),
+            java.util.Map.of(
+                "role",
+                roleCode
+            ),
+            java.util.Map.of(),
+            null
+        );
 
         return new AdminUserMutationResponse(
             toResponse(target),

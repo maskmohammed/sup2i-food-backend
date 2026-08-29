@@ -43,6 +43,11 @@ public class JwtService {
             .expiresAt(expiresAt)
             .id(UUID.randomUUID().toString())
 
+            // audiences: le(s) service(s) autorisé(s) à l'accepter
+            .audience(java.util.List.of(
+                properties.audience()
+            ))
+
             // refresh-token/session liée à ce JWT
             .claim("sid", sessionId.toString())
 

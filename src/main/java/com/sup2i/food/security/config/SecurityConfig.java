@@ -1,11 +1,15 @@
 package com.sup2i.food.security.config;
 
+import com.sup2i.food.security.ratelimit.RateLimitFilter;
+import com.sup2i.food.security.ratelimit.RateLimitService;
 import com.sup2i.food.security.service.SessionValidationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -15,9 +19,11 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -36,13 +42,51 @@ public class SecurityConfig {
             RestAuthenticationEntryPoint authenticationEntryPoint,
             RestAccessDeniedHandler accessDeniedHandler,
             SessionValidationService sessionValidationService,
-            CorsConfigurationSource corsConfigurationSource
+            CorsConfigurationSource corsConfigurationSource,
+            RateLimitService rateLimitService,
+            JsonMapper jsonMapper,
+            Environment environment
         ) throws Exception {
 
         http
             .csrf(
                 csrf ->
                     csrf.disable()
+            )
+
+            .headers(headers ->
+                headers
+                    .frameOptions(frame ->
+                        frame.deny()
+                    )
+                    .contentTypeOptions(
+                        Customizer.withDefaults()
+                    )
+                    .httpStrictTransportSecurity(
+                        hsts ->
+                            hsts
+                                .includeSubDomains(true)
+                                .maxAgeInSeconds(
+                                    31536000L
+                                )
+                    )
+                    .contentSecurityPolicy(
+                        csp ->
+                            csp.policyDirectives(
+                                "default-src 'none';"
+                                    + " frame-ancestors 'none';"
+                                    + " base-uri 'none';"
+                                    + " form-action 'none'"
+                            )
+                    )
+                    .referrerPolicy(
+                        referrer ->
+                            referrer.policy(
+                                ReferrerPolicyHeaderWriter
+                                    .ReferrerPolicy
+                                    .NO_REFERRER
+                            )
+                    )
             )
 
             .cors(cors ->
@@ -124,7 +168,28 @@ public class SecurityConfig {
                     authenticationEntryPoint
                 ),
                 BearerTokenAuthenticationFilter.class
+            )
+
+            .addFilterBefore(
+                new RateLimitFilter(
+                    rateLimitService,
+                    jsonMapper
+                ),
+                BearerTokenAuthenticationFilter.class
             );
+
+        if (
+            environment.getActiveProfiles().length > 0
+            && java.util.Arrays.asList(
+                    environment.getActiveProfiles()
+                )
+                .contains("prod")
+        ) {
+            http.requiresChannel(channel ->
+                channel.anyRequest()
+                    .requiresSecure()
+            );
+        }
 
         return http.build();
     }

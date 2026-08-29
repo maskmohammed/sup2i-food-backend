@@ -1,4 +1,4 @@
-package com.sup2i.food.catalog;
+﻿package com.sup2i.food.catalog;
 
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
@@ -2866,6 +2866,12 @@ class CatalogRecipeE2EIntegrationTest {
                     securityProperties
                         .jwt()
                         .issuer()
+                )
+                .audience(
+                    List.of(
+                        securityProperties
+                            .audience()
+                    )
                 )
                 .subject(
                     userId.toString()

@@ -1,5 +1,6 @@
 package com.sup2i.food.security.service;
 
+import com.sup2i.food.audit.service.AuditLogService;
 import com.sup2i.food.identity.domain.AuthIdentity;
 import com.sup2i.food.identity.domain.AuthProviderType;
 import com.sup2i.food.identity.domain.User;
@@ -47,6 +48,8 @@ public class PasswordResetService {
     private final TokenHashService tokenHashService;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
+    private final PasswordPolicyService passwordPolicyService;
+    private final AuditLogService auditLogService;
     private final SecurityProperties properties;
     private final Environment environment;
 
@@ -56,6 +59,8 @@ public class PasswordResetService {
         TokenHashService tokenHashService,
         PasswordEncoder passwordEncoder,
         RefreshTokenService refreshTokenService,
+        PasswordPolicyService passwordPolicyService,
+        AuditLogService auditLogService,
         SecurityProperties properties,
         Environment environment
     ) {
@@ -73,6 +78,12 @@ public class PasswordResetService {
 
         this.refreshTokenService =
             refreshTokenService;
+
+        this.passwordPolicyService =
+            passwordPolicyService;
+
+        this.auditLogService =
+            auditLogService;
 
         this.properties =
             properties;
@@ -141,12 +152,23 @@ public class PasswordResetService {
                 )
             );
 
-        log.info(
-            "Password reset requested for user {}; "
-                + "reset link (would be emailed): "
-                + "/reset-password?token={}",
+        auditLogService.record(
+            user.getOrganization().getId(),
+            null,
+            "PASSWORD_RESET_REQUESTED",
+            "USER",
             user.getId(),
-            generated.rawToken()
+            java.util.Map.of(),
+            java.util.Map.of(
+                "requested",
+                Boolean.TRUE
+            ),
+            null
+        );
+
+        log.info(
+            "Password reset requested for user {}.",
+            user.getId()
         );
 
         return new ForgotPasswordResponse(
@@ -162,6 +184,10 @@ public class PasswordResetService {
         String rawToken,
         String newPassword
     ) {
+
+        passwordPolicyService.enforce(
+            newPassword
+        );
 
         String hash =
             tokenHashService.hash(
@@ -239,6 +265,20 @@ public class PasswordResetService {
         }
 
         token.markUsed(now);
+
+        auditLogService.record(
+            user.getOrganization().getId(),
+            null,
+            "PASSWORD_RESET_COMPLETED",
+            "USER",
+            user.getId(),
+            java.util.Map.of(),
+            java.util.Map.of(
+                "completed",
+                Boolean.TRUE
+            ),
+            null
+        );
 
         refreshTokenService
             .revokeAllForUser(

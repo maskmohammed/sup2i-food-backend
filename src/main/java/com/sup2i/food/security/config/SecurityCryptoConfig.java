@@ -5,7 +5,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
@@ -15,6 +17,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.util.Base64;
+import java.util.List;
 
 @Configuration
 @EnableConfigurationProperties(SecurityProperties.class)
@@ -91,12 +94,44 @@ public class SecurityCryptoConfig {
             .macAlgorithm(MacAlgorithm.HS256)
             .build();
 
+        String audience =
+            properties.audience();
+
+        JwtClaimValidator<Object> audienceValidator =
+            new JwtClaimValidator<>(
+                "aud",
+                value ->
+                    audience != null
+                        && matchesAudience(
+                            value,
+                            audience
+                        )
+            );
+
         decoder.setJwtValidator(
-            JwtValidators.createDefaultWithIssuer(
-                properties.jwt().issuer()
+            new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefaultWithIssuer(
+                    properties.jwt().issuer()
+                ),
+                audienceValidator
             )
         );
 
         return decoder;
+    }
+
+    private boolean matchesAudience(
+        Object value,
+        String expected
+    ) {
+        if (value instanceof String stringValue) {
+            return expected.equals(stringValue);
+        }
+
+        if (value instanceof List<?> listValue) {
+            return listValue.contains(expected);
+        }
+
+        return false;
     }
 }

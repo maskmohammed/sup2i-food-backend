@@ -1,0 +1,8 @@
+# Test-only overrides.
+# Le rate limiting par buckets (Bucket4j) est désactivé par défaut en test pour
+# ne pas fausser les E2E existantes. Une classe de test spécifique le réactive
+# (properties inline) pour vérifier les 429.
+sup2i:
+  security:
+    rate-limit:
+      enabled: false

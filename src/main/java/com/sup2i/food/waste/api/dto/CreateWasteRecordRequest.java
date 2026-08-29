@@ -1,6 +1,7 @@
 package com.sup2i.food.waste.api.dto;
 
 import com.sup2i.food.common.domain.MeasurementUnit;
+import com.sup2i.food.security.validation.SafeText;
 import com.sup2i.food.waste.domain.WasteType;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
@@ -39,6 +40,8 @@ public record CreateWasteRecordRequest(
     @NotNull
     MeasurementUnit unit,
 
+    @SafeText
+    @Size(max = 500)
     String reasonText,
 
     @Size(max = 500)

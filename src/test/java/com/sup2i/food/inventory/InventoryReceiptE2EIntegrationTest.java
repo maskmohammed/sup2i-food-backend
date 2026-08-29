@@ -1,4 +1,4 @@
-package com.sup2i.food.inventory;
+﻿package com.sup2i.food.inventory;
 
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
@@ -1916,6 +1916,12 @@ class InventoryReceiptE2EIntegrationTest {
                     securityProperties
                         .jwt()
                         .issuer()
+                )
+                .audience(
+                    List.of(
+                        securityProperties
+                            .audience()
+                    )
                 )
                 .subject(
                     userId.toString()

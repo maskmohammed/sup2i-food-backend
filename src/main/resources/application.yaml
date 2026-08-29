@@ -17,6 +17,24 @@ spring:
 server:
   port: 8080
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: true
+    java:
+      enabled: true
+    os:
+      enabled: true
+
 sup2i:
   security:
     local-provider-code: local
@@ -25,8 +43,53 @@ sup2i:
       issuer: sup2i-food-backend
       access-token-ttl: 15m
       secret-base64: ${SUP2I_JWT_SECRET_BASE64}
+      # Défaut = issuer (fallback documenté). En production, fournir
+      # SUP2I_JWT_AUDIENCE (nom symbolique de l'application cliente).
+      audience: ${SUP2I_JWT_AUDIENCE:}
 
     refresh-token-ttl: 30d
+
+    rate-limit:
+      enabled: ${SUP2I_RATE_LIMIT_ENABLED:true}
+      buckets:
+        - name: LOGIN
+          capacity: 60
+          refill-period: 1m
+          refill-tokens: 30
+        - name: FORGOT_PASSWORD
+          capacity: 10
+          refill-period: 1m
+          refill-tokens: 3
+        - name: RESET_PASSWORD
+          capacity: 10
+          refill-period: 1m
+          refill-tokens: 2
+        - name: REFRESH
+          capacity: 120
+          refill-period: 1m
+          refill-tokens: 60
+        - name: MFA
+          capacity: 20
+          refill-period: 1m
+          refill-tokens: 10
+
+    password-policy:
+      enabled: true
+      min-length: 12
+      require-upper: true
+      require-lower: true
+      require-digit: true
+      require-special: true
+      forbidden:
+        - password
+        - password123
+        - 12345678
+        - qwerty123
+        - letmein
+        - admin123
+        - iloveyou
+        - 654321
+        - abc12345
 
   loyalty:
     mad-per-point: 10

@@ -54,6 +54,7 @@ import com.sup2i.food.menuvote.exception.MenuVoteValidationException;
 import com.sup2i.food.kitchen.exception.KitchenTicketConflictException;
 import com.sup2i.food.kitchen.exception.KitchenTicketNotFoundException;
 import com.sup2i.food.notification.exception.NotificationNotFoundException;
+import com.sup2i.food.security.exception.PasswordPolicyViolationException;
 import com.sup2i.food.security.exception.PasswordResetTokenInvalidException;
 import com.sup2i.food.subscription.exception.SubscriptionConflictException;
 import com.sup2i.food.subscription.exception.SubscriptionNotFoundException;
@@ -69,6 +70,8 @@ import com.sup2i.food.purchase.exception.PurchaseValidationException;
 import com.sup2i.food.waste.exception.WasteConflictException;
 import com.sup2i.food.waste.exception.WasteNotFoundException;
 import com.sup2i.food.waste.exception.WasteValidationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.time.OffsetDateTime;
@@ -78,6 +81,42 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger
+        log =
+            LoggerFactory.getLogger(
+                GlobalExceptionHandler.class
+            );
+
+    @ExceptionHandler(
+        Exception.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        unexpected(
+            Exception exception,
+            HttpServletRequest request
+        ) {
+
+        log.error(
+            "Unhandled exception on [{}] {} (traceId={}). "
+                + "Preparing payload for centralized error tracking "
+                + "(e.g. Sentry/Datadog).",
+            request.getMethod(),
+            request.getRequestURI(),
+            RequestTrace.resolve(request),
+            exception
+        );
+
+        return error(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "INTERNAL_ERROR",
+            "An unexpected error occurred.",
+            request,
+            Map.of(),
+            exception
+        );
+    }
+
     @ExceptionHandler(
         OrderValidationException.class
     )
@@ -443,6 +482,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse>
         passwordResetTokenInvalid(
             PasswordResetTokenInvalidException exception,
+            HttpServletRequest request
+        ) {
+
+        return error(
+            HttpStatus.BAD_REQUEST,
+            "VALIDATION_ERROR",
+            exception.getMessage(),
+            request,
+            Map.of()
+        );
+    }
+
+    @ExceptionHandler(
+        PasswordPolicyViolationException.class
+    )
+    public ResponseEntity<ApiErrorResponse>
+        passwordPolicyViolation(
+            PasswordPolicyViolationException exception,
             HttpServletRequest request
         ) {
 
@@ -1263,10 +1320,51 @@ public class GlobalExceptionHandler {
             Map<String, Object> details
         ) {
 
+        return error(
+            status,
+            code,
+            message,
+            request,
+            details,
+            null
+        );
+    }
+
+    private ResponseEntity<ApiErrorResponse>
+        error(
+            HttpStatus status,
+            String code,
+            String message,
+            HttpServletRequest request,
+            Map<String, Object> details,
+            Throwable cause
+        ) {
+
         String traceId =
             RequestTrace.resolve(
                 request
             );
+
+        if (status.is5xxServerError()) {
+            log.error(
+                "{} {} -> {} (code={}, traceId={})",
+                request.getMethod(),
+                request.getRequestURI(),
+                status.value(),
+                code,
+                traceId,
+                cause
+            );
+        } else {
+            log.warn(
+                "{} {} -> {} (code={}, traceId={})",
+                request.getMethod(),
+                request.getRequestURI(),
+                status.value(),
+                code,
+                traceId
+            );
+        }
 
         ApiErrorResponse body =
             new ApiErrorResponse(

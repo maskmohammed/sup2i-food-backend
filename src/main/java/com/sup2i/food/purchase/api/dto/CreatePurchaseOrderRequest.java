@@ -1,5 +1,6 @@
 package com.sup2i.food.purchase.api.dto;
 
+import com.sup2i.food.security.validation.SafeText;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -16,6 +17,8 @@ public record CreatePurchaseOrderRequest(
     @NotNull
     UUID campusId,
 
+    @SafeText
+    @Size(max = 1000)
     String notes,
 
     @NotEmpty

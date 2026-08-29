@@ -1,7 +1,7 @@
 package com.sup2i.food.security.api.dto;
 
+import com.sup2i.food.security.validation.StrongPassword;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 
 public record ResetPasswordRequest(
 
@@ -9,7 +9,7 @@ public record ResetPasswordRequest(
     String token,
 
     @NotBlank
-    @Size(min = 8)
+    @StrongPassword
     String newPassword
 ) {
 }

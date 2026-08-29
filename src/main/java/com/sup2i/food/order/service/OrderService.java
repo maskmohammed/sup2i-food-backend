@@ -773,6 +773,282 @@ public class OrderService {
         );
     }
 
+
+    @Transactional(readOnly = true)
+    public PosDirectQuote quotePosDirect(
+        UUID actorId,
+        UpsertOrderRequest request
+    ) {
+
+        User actor =
+            authenticatedStaff(
+                actorId
+            );
+
+        UUID organizationId =
+            actor
+                .getOrganization()
+                .getId();
+
+        if (request == null) {
+            throw new OrderValidationException(
+                "POS sale request is required."
+            );
+        }
+
+        ownedActiveLocation(
+            request.locationId(),
+            organizationId
+        );
+
+        DraftSnapshot snapshot =
+            buildDraftSnapshot(
+                request,
+                organizationId
+            );
+
+        if (snapshot.lines().isEmpty()) {
+            throw new OrderValidationException(
+                "POS sale must contain at least one item."
+            );
+        }
+
+        List<PosDirectQuoteLine> lines =
+            snapshot
+                .lines()
+                .stream()
+                .map(line ->
+                    new PosDirectQuoteLine(
+                        line.product()
+                            .getId(),
+                        line.variant()
+                            == null
+                                ? null
+                                : line
+                                    .variant()
+                                    .getId(),
+                        line.productName(),
+                        line.variantName(),
+                        line.sku(),
+                        line.unitPrice(),
+                        line.quantity(),
+                        BigDecimal.ZERO
+                            .setScale(2),
+                        line.lineTotal(),
+                        line.taxRate(),
+                        line.lineTax(),
+                        line.specialInstructions()
+                    )
+                )
+                .toList();
+
+        return new PosDirectQuote(
+            snapshot.subtotal(),
+            snapshot.taxTotal(),
+            BigDecimal.ZERO
+                .setScale(2),
+            snapshot.total(),
+            snapshot.currency(),
+            lines
+        );
+    }
+
+    @Transactional
+    public OrderResponse createPosDirect(
+        UUID actorId,
+        UpsertOrderRequest request
+    ) {
+
+        User actor =
+            authenticatedStaff(
+                actorId
+            );
+
+        UUID organizationId =
+            actor
+                .getOrganization()
+                .getId();
+
+        if (request == null) {
+            throw new OrderValidationException(
+                "POS sale request is required."
+            );
+        }
+
+        Location location =
+            ownedActiveLocation(
+                request.locationId(),
+                organizationId
+            );
+
+        DraftSnapshot snapshot =
+            buildDraftSnapshot(
+                request,
+                organizationId
+            );
+
+        if (snapshot.lines().isEmpty()) {
+            throw new OrderValidationException(
+                "POS sale must contain at least one item."
+            );
+        }
+
+        LocalDate businessDate =
+            LocalDate.now();
+
+        Order order =
+            new Order(
+                UUID.randomUUID(),
+                actor.getOrganization(),
+                location.getCampus(),
+                location,
+                null,
+                nextOrderNumber(
+                    organizationId,
+                    location.getId(),
+                    businessDate
+                ),
+                businessDate,
+                OrderSource.POS,
+                OrderType.POS_DIRECT,
+                snapshot.currency(),
+                snapshot.customerNote()
+            );
+
+        order.updateDraftSnapshot(
+            snapshot.currency(),
+            snapshot.customerNote(),
+            snapshot.subtotal(),
+            snapshot.taxTotal(),
+            BigDecimal.ZERO
+                .setScale(2),
+            snapshot.total()
+        );
+
+        order =
+            orderRepository
+                .saveAndFlush(
+                    order
+                );
+
+        List<OrderItem> items =
+            new ArrayList<>();
+
+        for (
+            DraftLineSpec spec
+            : snapshot.lines()
+        ) {
+
+            items.add(
+                new OrderItem(
+                    UUID.randomUUID(),
+                    order,
+                    spec.product(),
+                    spec.variant(),
+                    spec.productName(),
+                    spec.variantName(),
+                    spec.sku(),
+                    spec.unitPrice(),
+                    spec.quantity(),
+                    BigDecimal.ZERO
+                        .setScale(2),
+                    spec.lineTotal(),
+                    spec.taxRate(),
+                    spec.lineTax(),
+                    spec.specialInstructions()
+                )
+            );
+        }
+
+        orderItemRepository
+            .saveAllAndFlush(
+                items
+            );
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                null,
+                OrderStatus.DRAFT,
+                actor,
+                "POS direct sale created.",
+                OrderStatusHistorySource.POS
+            )
+        );
+
+        OrderStatus firstFrom =
+            order.getStatus();
+
+        order.markCreated();
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                firstFrom,
+                OrderStatus.CREATED,
+                actor,
+                "POS direct sale submitted.",
+                OrderStatusHistorySource.POS
+            )
+        );
+
+        for (
+            OrderItem item
+            : items
+        ) {
+            validateStoredLine(
+                item
+            );
+        }
+
+        OffsetDateTime expiresAt =
+            OffsetDateTime
+                .now()
+                .plusMinutes(
+                    PAYMENT_TTL_MINUTES
+                );
+
+        reserveStock(
+            order,
+            items,
+            actor,
+            expiresAt
+        );
+
+        OrderStatus secondFrom =
+            order.getStatus();
+
+        order.markAwaitingPayment(
+            expiresAt
+        );
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                secondFrom,
+                OrderStatus.AWAITING_PAYMENT,
+                actor,
+                "POS direct sale awaiting payment.",
+                OrderStatusHistorySource.POS
+            )
+        );
+
+        orderRepository
+            .saveAndFlush(
+                order
+            );
+
+        historyRepository.flush();
+
+        inventoryAlertService
+            .reconcileOrganization(
+                organizationId
+            );
+
+        return response(
+            order
+        );
+    }
     @Transactional(readOnly = true)
     public OrderResponse find(
         UUID actorId,
@@ -1955,6 +2231,60 @@ public class OrderService {
         }
     }
 
+    private User authenticatedStaff(
+        UUID actorId
+    ) {
+
+        if (actorId == null) {
+            throw new BadCredentialsException(
+                "Authenticated user does not exist."
+            );
+        }
+
+        User actor =
+            userRepository
+                .findById(
+                    actorId
+                )
+                .orElseThrow(() ->
+                    new BadCredentialsException(
+                        "Authenticated user does not exist."
+                    )
+                );
+
+        Long active =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM users
+                WHERE id = ?
+                  AND status = 'ACTIVE'
+                """,
+                Long.class,
+                actorId
+            );
+
+        if (
+            active == null
+            || active != 1L
+        ) {
+            throw new BadCredentialsException(
+                "Authenticated user is not active."
+            );
+        }
+
+        if (
+            !actor
+                .getOrganization()
+                .isActive()
+        ) {
+            throw new OrderConflictException(
+                "Organization is inactive."
+            );
+        }
+
+        return actor;
+    }
     private ActorContext mobileStudent(
         UUID actorId
     ) {

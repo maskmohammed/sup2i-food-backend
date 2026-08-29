@@ -1,8 +1,10 @@
 package com.sup2i.food.pos.api;
 
 import com.sup2i.food.pos.api.dto.ClosePosSessionRequest;
+import com.sup2i.food.pos.api.dto.ForceClosePosSessionRequest;
 import com.sup2i.food.pos.api.dto.OpenPosSessionRequest;
 import com.sup2i.food.pos.api.dto.PosSessionResponse;
+import com.sup2i.food.pos.service.PosReconciliationService;
 import com.sup2i.food.pos.service.PosSessionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -29,13 +31,20 @@ import java.util.UUID;
 )
 public class PosSessionController {
 
-    private final PosSessionService service;
+    private final PosSessionService sessionService;
+
+    private final PosReconciliationService
+        reconciliationService;
 
     public PosSessionController(
-        PosSessionService service
+        PosSessionService sessionService,
+        PosReconciliationService reconciliationService
     ) {
-        this.service =
-            service;
+        this.sessionService =
+            sessionService;
+
+        this.reconciliationService =
+            reconciliationService;
     }
 
     @PostMapping
@@ -64,7 +73,7 @@ public class PosSessionController {
         JwtAuthenticationToken authentication
     ) {
 
-        return service.open(
+        return sessionService.open(
             actorId(
                 authentication
             ),
@@ -102,7 +111,46 @@ public class PosSessionController {
         JwtAuthenticationToken authentication
     ) {
 
-        return service.close(
+        return reconciliationService.close(
+            actorId(
+                authentication
+            ),
+            sessionId,
+            request.countedCash(),
+            request.comment(),
+            idempotencyKey
+        );
+    }
+
+    @PostMapping(
+        "/{sessionId}/force-close"
+    )
+    @PreAuthorize(
+        "hasAuthority('pos.force_close')"
+    )
+    public PosSessionResponse forceClose(
+        @PathVariable
+        UUID sessionId,
+
+        @NotBlank
+        @Size(
+            min = 8,
+            max = 160
+        )
+        @RequestHeader(
+            name = "Idempotency-Key",
+            required = true
+        )
+        String idempotencyKey,
+
+        @Valid
+        @RequestBody
+        ForceClosePosSessionRequest request,
+
+        JwtAuthenticationToken authentication
+    ) {
+
+        return reconciliationService.forceClose(
             actorId(
                 authentication
             ),
@@ -126,7 +174,8 @@ public class PosSessionController {
             );
 
         } catch (
-            IllegalArgumentException exception
+            NullPointerException
+            | IllegalArgumentException exception
         ) {
 
             throw new BadCredentialsException(

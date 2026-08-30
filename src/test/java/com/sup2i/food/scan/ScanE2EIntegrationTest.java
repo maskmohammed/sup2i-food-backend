@@ -1242,21 +1242,47 @@ class ScanE2EIntegrationTest {
     }
 
     @Test
-    void foodPassCredentialIsNotResolvedInP2()
+    void foodPassResolvesOpenApiShapeAndAuditsWithoutBusinessMutation()
         throws Exception {
 
-        String rawValue =
-            qr(
-                "FOOD-PASS"
+        StudentFixture student =
+            insertStudent(
+                organizationId,
+                campusId,
+                "SUCCESS",
+                "ACTIVE",
+                "ACTIVE"
             );
 
-        insertCredential(
-            "FOOD_PASS",
-            UUID.randomUUID(),
-            rawValue,
-            "ACTIVE",
-            null
-        );
+        OffsetDateTime passExpiresAt =
+            OffsetDateTime
+                .now()
+                .plusDays(30);
+
+        FoodPassFixture pass =
+            insertFoodPass(
+                student.studentId(),
+                "ACTIVE",
+                "ACTIVE",
+                null,
+                passExpiresAt
+            );
+
+        String passStatusBefore =
+            foodPassStatus(
+                pass.foodPassId()
+            );
+
+        String credentialStatusBefore =
+            credentialStatus(
+                pass.credentialId()
+            );
+
+        assertThat(
+            mealUsageCount(
+                student.studentId()
+            )
+        ).isZero();
 
         mockMvc.perform(
                 post(
@@ -1271,7 +1297,466 @@ class ScanE2EIntegrationTest {
                     )
                     .content(
                         scanBody(
-                            rawValue,
+                            pass.rawToken(),
+                            null
+                        )
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.type")
+                    .value("FOOD_PASS")
+            )
+            .andExpect(
+                jsonPath("$.foodPass.id")
+                    .value(
+                        pass
+                            .foodPassId()
+                            .toString()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.foodPass.cardNumber")
+                    .value(
+                        pass.cardNumber()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.foodPass.status")
+                    .value("ACTIVE")
+            )
+            .andExpect(
+                jsonPath("$.foodPass.expiresAt")
+                    .exists()
+            )
+            .andExpect(
+                jsonPath("$.foodPass.student.id")
+                    .value(
+                        student
+                            .studentId()
+                            .toString()
+                    )
+            )
+            .andExpect(
+                jsonPath(
+                    "$.foodPass.student.studentNumber"
+                )
+                    .value(
+                        student.studentNumber()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.foodPass.student.program")
+                    .value(
+                        student.program()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.foodPass.student.level")
+                    .value(
+                        student.level()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.foodPass.student.groupName")
+                    .value(
+                        student.groupName()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.foodPass.student.photoUrl")
+                    .value(
+                        student.photoUrl()
+                    )
+            )
+            .andExpect(
+                jsonPath("$.currentMealEligibility")
+                    .doesNotExist()
+            );
+
+        Map<String, Object> event =
+            latestEvent(
+                pass.rawToken()
+            );
+
+        assertThat(
+            event.get("scan_type")
+        ).isEqualTo(
+            "FOOD_PASS"
+        );
+
+        assertThat(
+            event.get("result")
+        ).isEqualTo(
+            "SUCCESS"
+        );
+
+        assertThat(
+            event.get(
+                "resolved_reference_id"
+            )
+        ).isEqualTo(
+            pass.foodPassId()
+        );
+
+        assertThat(
+            event.get("error_code")
+        ).isNull();
+
+        assertThat(
+            event.get("token_fingerprint")
+        ).isEqualTo(
+            tokenHasher.hash(
+                pass.rawToken()
+            )
+        );
+
+        assertThat(
+            foodPassStatus(
+                pass.foodPassId()
+            )
+        ).isEqualTo(
+            passStatusBefore
+        );
+
+        assertThat(
+            credentialStatus(
+                pass.credentialId()
+            )
+        ).isEqualTo(
+            credentialStatusBefore
+        );
+
+        assertThat(
+            mealUsageCount(
+                student.studentId()
+            )
+        ).isZero();
+    }
+
+    @Test
+    void revokedFoodPassCredentialReturnsQrRevokedAndAuditsRefusal()
+        throws Exception {
+
+        StudentFixture student =
+            insertStudent(
+                organizationId,
+                campusId,
+                "CRED-REVOKED",
+                "ACTIVE",
+                "ACTIVE"
+            );
+
+        FoodPassFixture pass =
+            insertFoodPass(
+                student.studentId(),
+                "ACTIVE",
+                "REVOKED",
+                null,
+                null
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/scan/resolve"
+                )
+                    .header(
+                        "Authorization",
+                        bearer()
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        scanBody(
+                            pass.rawToken(),
+                            null
+                        )
+                    )
+            )
+            .andExpect(
+                status().isConflict()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("QR_REVOKED")
+            );
+
+        assertRefusedFoodPassEvent(
+            pass.rawToken(),
+            pass.foodPassId(),
+            "QR_REVOKED"
+        );
+
+        assertThat(
+            credentialStatus(
+                pass.credentialId()
+            )
+        ).isEqualTo(
+            "REVOKED"
+        );
+
+        assertThat(
+            mealUsageCount(
+                student.studentId()
+            )
+        ).isZero();
+    }
+
+    @Test
+    void expiredFoodPassCredentialReturnsQrExpiredAndAuditsRefusal()
+        throws Exception {
+
+        StudentFixture student =
+            insertStudent(
+                organizationId,
+                campusId,
+                "CRED-EXPIRED",
+                "ACTIVE",
+                "ACTIVE"
+            );
+
+        FoodPassFixture pass =
+            insertFoodPass(
+                student.studentId(),
+                "ACTIVE",
+                "ACTIVE",
+                OffsetDateTime
+                    .now()
+                    .minusMinutes(1),
+                null
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/scan/resolve"
+                )
+                    .header(
+                        "Authorization",
+                        bearer()
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        scanBody(
+                            pass.rawToken(),
+                            null
+                        )
+                    )
+            )
+            .andExpect(
+                status().isConflict()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("QR_EXPIRED")
+            );
+
+        assertRefusedFoodPassEvent(
+            pass.rawToken(),
+            pass.foodPassId(),
+            "QR_EXPIRED"
+        );
+
+        assertThat(
+            credentialStatus(
+                pass.credentialId()
+            )
+        ).isEqualTo(
+            "ACTIVE"
+        );
+
+        assertThat(
+            mealUsageCount(
+                student.studentId()
+            )
+        ).isZero();
+    }
+
+    @Test
+    void pendingIssueFoodPassReturnsInvalidQrAndAuditsRefusal()
+        throws Exception {
+
+        StudentFixture student =
+            insertStudent(
+                organizationId,
+                campusId,
+                "PENDING",
+                "ACTIVE",
+                "ACTIVE"
+            );
+
+        FoodPassFixture pass =
+            insertFoodPass(
+                student.studentId(),
+                "PENDING_ISSUE",
+                "ACTIVE",
+                null,
+                null
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/scan/resolve"
+                )
+                    .header(
+                        "Authorization",
+                        bearer()
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        scanBody(
+                            pass.rawToken(),
+                            null
+                        )
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("INVALID_QR")
+            );
+
+        assertRefusedFoodPassEvent(
+            pass.rawToken(),
+            pass.foodPassId(),
+            "INVALID_QR"
+        );
+
+        assertThat(
+            foodPassStatus(
+                pass.foodPassId()
+            )
+        ).isEqualTo(
+            "PENDING_ISSUE"
+        );
+
+        assertThat(
+            mealUsageCount(
+                student.studentId()
+            )
+        ).isZero();
+    }
+
+    @Test
+    void inactiveFoodPassStudentReturnsInvalidQrAndDoesNotMutatePass()
+        throws Exception {
+
+        StudentFixture student =
+            insertStudent(
+                organizationId,
+                campusId,
+                "INACTIVE",
+                "SUSPENDED",
+                "ACTIVE"
+            );
+
+        FoodPassFixture pass =
+            insertFoodPass(
+                student.studentId(),
+                "ACTIVE",
+                "ACTIVE",
+                null,
+                null
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/scan/resolve"
+                )
+                    .header(
+                        "Authorization",
+                        bearer()
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        scanBody(
+                            pass.rawToken(),
+                            null
+                        )
+                    )
+            )
+            .andExpect(
+                status().isNotFound()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("INVALID_QR")
+            );
+
+        assertRefusedFoodPassEvent(
+            pass.rawToken(),
+            pass.foodPassId(),
+            "INVALID_QR"
+        );
+
+        assertThat(
+            foodPassStatus(
+                pass.foodPassId()
+            )
+        ).isEqualTo(
+            "ACTIVE"
+        );
+
+        assertThat(
+            credentialStatus(
+                pass.credentialId()
+            )
+        ).isEqualTo(
+            "ACTIVE"
+        );
+    }
+
+    @Test
+    void foreignTenantFoodPassDoesNotLeakCredentialState()
+        throws Exception {
+
+        Tenant foreign =
+            insertTenant(
+                "FOREIGN-FOOD-PASS"
+            );
+
+        StudentFixture student =
+            insertStudent(
+                foreign.organizationId(),
+                foreign.campusId(),
+                "FOREIGN",
+                "ACTIVE",
+                "ACTIVE"
+            );
+
+        FoodPassFixture pass =
+            insertFoodPass(
+                student.studentId(),
+                "ACTIVE",
+                "REVOKED",
+                null,
+                null
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/scan/resolve"
+                )
+                    .header(
+                        "Authorization",
+                        bearer()
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        scanBody(
+                            pass.rawToken(),
                             null
                         )
                     )
@@ -1288,7 +1773,7 @@ class ScanE2EIntegrationTest {
 
         Map<String, Object> event =
             latestEvent(
-                rawValue
+                pass.rawToken()
             );
 
         assertThat(
@@ -1298,10 +1783,201 @@ class ScanE2EIntegrationTest {
         );
 
         assertThat(
+            event.get("result")
+        ).isEqualTo(
+            "UNKNOWN"
+        );
+
+        assertThat(
             event.get(
                 "resolved_reference_id"
             )
         ).isNull();
+
+        assertThat(
+            event.get("error_code")
+        ).isEqualTo(
+            "RESOURCE_NOT_FOUND"
+        );
+
+        assertThat(
+            credentialStatus(
+                pass.credentialId()
+            )
+        ).isEqualTo(
+            "REVOKED"
+        );
+    }
+
+    @Test
+    void foodPassLifecycleStatesAreDisplayedWithoutDistribution()
+        throws Exception {
+
+        StudentFixture student =
+            insertStudent(
+                organizationId,
+                campusId,
+                "LIFECYCLE",
+                "ACTIVE",
+                "ACTIVE"
+            );
+
+        for (
+            String expectedStatus :
+            List.of(
+                "BLOCKED",
+                "LOST",
+                "REVOKED",
+                "EXPIRED",
+                "REPLACED"
+            )
+        ) {
+
+            FoodPassFixture pass =
+                insertFoodPass(
+                    student.studentId(),
+                    expectedStatus,
+                    "ACTIVE",
+                    null,
+                    null
+                );
+
+            mockMvc.perform(
+                    post(
+                        "/api/v1/scan/resolve"
+                    )
+                        .header(
+                            "Authorization",
+                            bearer()
+                        )
+                        .contentType(
+                            MediaType.APPLICATION_JSON
+                        )
+                        .content(
+                            scanBody(
+                                pass.rawToken(),
+                                null
+                            )
+                        )
+                )
+                .andExpect(
+                    status().isOk()
+                )
+                .andExpect(
+                    jsonPath("$.type")
+                        .value("FOOD_PASS")
+                )
+                .andExpect(
+                    jsonPath("$.foodPass.id")
+                        .value(
+                            pass
+                                .foodPassId()
+                                .toString()
+                        )
+                )
+                .andExpect(
+                    jsonPath("$.foodPass.status")
+                        .value(
+                            expectedStatus
+                        )
+                );
+
+            Map<String, Object> event =
+                latestEvent(
+                    pass.rawToken()
+                );
+
+            assertThat(
+                event.get("scan_type")
+            ).isEqualTo(
+                "FOOD_PASS"
+            );
+
+            assertThat(
+                event.get("result")
+            ).isEqualTo(
+                "SUCCESS"
+            );
+
+            assertThat(
+                event.get(
+                    "resolved_reference_id"
+                )
+            ).isEqualTo(
+                pass.foodPassId()
+            );
+
+            assertThat(
+                foodPassStatus(
+                    pass.foodPassId()
+                )
+            ).isEqualTo(
+                expectedStatus
+            );
+        }
+
+        FoodPassFixture timedExpired =
+            insertFoodPass(
+                student.studentId(),
+                "ACTIVE",
+                "ACTIVE",
+                null,
+                OffsetDateTime
+                    .now()
+                    .minusMinutes(1)
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/scan/resolve"
+                )
+                    .header(
+                        "Authorization",
+                        bearer()
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        scanBody(
+                            timedExpired.rawToken(),
+                            null
+                        )
+                    )
+            )
+            .andExpect(
+                status().isOk()
+            )
+            .andExpect(
+                jsonPath("$.type")
+                    .value("FOOD_PASS")
+            )
+            .andExpect(
+                jsonPath("$.foodPass.status")
+                    .value("EXPIRED")
+            );
+
+        assertThat(
+            foodPassStatus(
+                timedExpired.foodPassId()
+            )
+        ).isEqualTo(
+            "ACTIVE"
+        );
+
+        assertThat(
+            credentialStatus(
+                timedExpired.credentialId()
+            )
+        ).isEqualTo(
+            "ACTIVE"
+        );
+
+        assertThat(
+            mealUsageCount(
+                student.studentId()
+            )
+        ).isZero();
     }
 
     private void assertRefusedOrderEvent(
@@ -1333,6 +2009,44 @@ class ScanE2EIntegrationTest {
             )
         ).isEqualTo(
             orderId
+        );
+
+        assertThat(
+            event.get("error_code")
+        ).isEqualTo(
+            errorCode
+        );
+    }
+
+    private void assertRefusedFoodPassEvent(
+        String rawValue,
+        UUID foodPassId,
+        String errorCode
+    ) {
+
+        Map<String, Object> event =
+            latestEvent(
+                rawValue
+            );
+
+        assertThat(
+            event.get("scan_type")
+        ).isEqualTo(
+            "FOOD_PASS"
+        );
+
+        assertThat(
+            event.get("result")
+        ).isEqualTo(
+            "REFUSED"
+        );
+
+        assertThat(
+            event.get(
+                "resolved_reference_id"
+            )
+        ).isEqualTo(
+            foodPassId
         );
 
         assertThat(
@@ -1534,6 +2248,291 @@ class ScanE2EIntegrationTest {
             campus,
             location
         );
+    }
+
+    private StudentFixture insertStudent(
+        UUID tenantOrganizationId,
+        UUID tenantCampusId,
+        String prefix,
+        String enrollmentStatus,
+        String userStatus
+    ) {
+
+        UUID studentUserId =
+            UUID.randomUUID();
+
+        UUID studentId =
+            UUID.randomUUID();
+
+        String suffix =
+            randomSuffix();
+
+        String studentNumber =
+            "STU-" + suffix;
+
+        String program =
+            "SCAN-PROGRAM";
+
+        String level =
+            "L3";
+
+        String groupName =
+            prefix + "-G";
+
+        String photoUrl =
+            "https://example.test/"
+                + suffix
+                + ".jpg";
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (
+                id,
+                organization_id,
+                email,
+                first_name,
+                last_name,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            studentUserId,
+            tenantOrganizationId,
+            (
+                "scan-student-"
+                    + suffix
+                    + "@sup2i.test"
+            ).toLowerCase(
+                Locale.ROOT
+            ),
+            "Food",
+            "Pass",
+            userStatus
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO students (
+                id,
+                user_id,
+                campus_id,
+                student_number,
+                program,
+                level,
+                group_name,
+                enrollment_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            studentId,
+            studentUserId,
+            tenantCampusId,
+            studentNumber,
+            program,
+            level,
+            groupName,
+            enrollmentStatus
+        );
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO student_photos (
+                id,
+                student_id,
+                photo_url,
+                source,
+                is_current
+            )
+            VALUES (
+                ?, ?, ?,
+                'ADMINISTRATION',
+                TRUE
+            )
+            """,
+            UUID.randomUUID(),
+            studentId,
+            photoUrl
+        );
+
+        return new StudentFixture(
+            studentId,
+            studentUserId,
+            studentNumber,
+            program,
+            level,
+            groupName,
+            photoUrl
+        );
+    }
+
+    private FoodPassFixture insertFoodPass(
+        UUID studentId,
+        String foodPassStatus,
+        String credentialStatus,
+        OffsetDateTime credentialExpiresAt,
+        OffsetDateTime foodPassExpiresAt
+    ) {
+
+        UUID foodPassId =
+            UUID.randomUUID();
+
+        UUID credentialId =
+            UUID.randomUUID();
+
+        String rawToken =
+            "B11-FOOD-PASS-"
+                + UUID.randomUUID();
+
+        String cardNumber =
+            "B11-CARD-"
+                + randomSuffix();
+
+        OffsetDateTime credentialIssuedAt =
+            OffsetDateTime
+                .now()
+                .minusDays(1);
+
+        if (
+            credentialExpiresAt != null
+                && !credentialIssuedAt.isBefore(
+                    credentialExpiresAt
+                )
+        ) {
+
+            credentialIssuedAt =
+                credentialExpiresAt
+                    .minusDays(1);
+        }
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO qr_credentials (
+                id,
+                credential_type,
+                subject_id,
+                token_hash,
+                status,
+                issued_at,
+                expires_at,
+                medium
+            )
+            VALUES (
+                ?,
+                'FOOD_PASS',
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                'QR'
+            )
+            """,
+            credentialId,
+            foodPassId,
+            tokenHasher.hash(
+                rawToken
+            ),
+            credentialStatus,
+            credentialIssuedAt,
+            credentialExpiresAt
+        );
+
+        OffsetDateTime issuedAt =
+            OffsetDateTime
+                .now()
+                .minusDays(1);
+
+        if (
+            foodPassExpiresAt != null
+                && !issuedAt.isBefore(
+                    foodPassExpiresAt
+                )
+        ) {
+
+            issuedAt =
+                foodPassExpiresAt
+                    .minusDays(1);
+        }
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO food_passes (
+                id,
+                student_id,
+                credential_id,
+                card_number,
+                status,
+                issued_at,
+                expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            foodPassId,
+            studentId,
+            credentialId,
+            cardNumber,
+            foodPassStatus,
+            issuedAt,
+            foodPassExpiresAt
+        );
+
+        return new FoodPassFixture(
+            foodPassId,
+            credentialId,
+            studentId,
+            rawToken,
+            cardNumber
+        );
+    }
+
+    private String foodPassStatus(
+        UUID foodPassId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT status
+            FROM food_passes
+            WHERE id = ?
+            """,
+            String.class,
+            foodPassId
+        );
+    }
+
+    private String credentialStatus(
+        UUID credentialId
+    ) {
+
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT status
+            FROM qr_credentials
+            WHERE id = ?
+            """,
+            String.class,
+            credentialId
+        );
+    }
+
+    private long mealUsageCount(
+        UUID studentId
+    ) {
+
+        Long count =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM meal_usages
+                WHERE student_id = ?
+                """,
+                Long.class,
+                studentId
+            );
+
+        return count == null
+            ? 0L
+            : count;
     }
 
     private UUID insertLocation(
@@ -1993,6 +2992,26 @@ class ScanE2EIntegrationTest {
             .toUpperCase(
                 Locale.ROOT
             );
+    }
+
+    private record StudentFixture(
+        UUID studentId,
+        UUID userId,
+        String studentNumber,
+        String program,
+        String level,
+        String groupName,
+        String photoUrl
+    ) {
+    }
+
+    private record FoodPassFixture(
+        UUID foodPassId,
+        UUID credentialId,
+        UUID studentId,
+        String rawToken,
+        String cardNumber
+    ) {
     }
 
     private record Tenant(

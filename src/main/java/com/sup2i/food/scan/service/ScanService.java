@@ -8,8 +8,11 @@ import com.sup2i.food.order.domain.OrderSource;
 import com.sup2i.food.order.domain.OrderStatus;
 import com.sup2i.food.order.domain.OrderType;
 import com.sup2i.food.order.domain.StockReservationStatus;
+import com.sup2i.food.scan.api.dto.FoodPassResponse;
+import com.sup2i.food.scan.api.dto.FoodPassScanResult;
 import com.sup2i.food.scan.api.dto.OrderScanResult;
 import com.sup2i.food.scan.api.dto.ProductScanProductResponse;
+import com.sup2i.food.scan.api.dto.StudentSummary;
 import com.sup2i.food.scan.api.dto.ProductScanResult;
 import com.sup2i.food.scan.api.dto.ScanRequest;
 import com.sup2i.food.scan.api.dto.ScanResponse;
@@ -197,6 +200,45 @@ public class ScanService {
 
             return new OrderScanResult(
                 response
+            );
+        }
+
+        Optional<FoodPassCandidate> foodPass =
+            foodPass(
+                fingerprint,
+                organizationId
+            );
+
+        if (foodPass.isPresent()) {
+
+            FoodPassCandidate value =
+                foodPass.get();
+
+            validateFoodPassCredential(
+                value,
+                request.terminalId(),
+                actorId,
+                fingerprint
+            );
+
+            FoodPassResponse response =
+                foodPassResponse(
+                    value
+                );
+
+            audit(
+                request.terminalId(),
+                actorId,
+                "FOOD_PASS",
+                "SUCCESS",
+                response.id(),
+                fingerprint,
+                null
+            );
+
+            return new FoodPassScanResult(
+                response,
+                null
             );
         }
 
@@ -595,6 +637,335 @@ public class ScanService {
         return quantity == null
             ? BigDecimal.ZERO
             : quantity;
+    }
+
+    private Optional<FoodPassCandidate> foodPass(
+        String fingerprint,
+        UUID organizationId
+    ) {
+
+        List<FoodPassCandidate> passes =
+            jdbcTemplate.query(
+                """
+                SELECT
+                    fp.id AS food_pass_id,
+                    fp.card_number,
+                    fp.status AS food_pass_status,
+                    fp.expires_at AS food_pass_expires_at,
+
+                    qc.status AS credential_status,
+                    qc.expires_at AS credential_expires_at,
+
+                    s.id AS student_id,
+                    s.student_number,
+                    s.program,
+                    s.level,
+                    s.group_name,
+                    sp.photo_url,
+                    s.enrollment_status,
+
+                    u.status AS student_user_status,
+                    c.is_active AS campus_active
+
+                FROM qr_credentials qc
+
+                JOIN food_passes fp
+                  ON fp.credential_id = qc.id
+                 AND qc.subject_id = fp.id
+
+                JOIN students s
+                  ON s.id = fp.student_id
+
+                LEFT JOIN student_photos sp
+                  ON sp.student_id = s.id
+                 AND sp.is_current = TRUE
+                 AND sp.revoked_at IS NULL
+
+                JOIN users u
+                  ON u.id = s.user_id
+
+                JOIN campuses c
+                  ON c.id = s.campus_id
+
+                WHERE qc.token_hash = ?
+                  AND qc.credential_type = 'FOOD_PASS'
+                  AND u.organization_id = ?
+                  AND c.organization_id = ?
+                """,
+                (
+                    resultSet,
+                    rowNumber
+                ) ->
+                    new FoodPassCandidate(
+                        resultSet.getObject(
+                            "food_pass_id",
+                            UUID.class
+                        ),
+                        resultSet.getString(
+                            "card_number"
+                        ),
+                        resultSet.getString(
+                            "food_pass_status"
+                        ),
+                        resultSet.getObject(
+                            "food_pass_expires_at",
+                            OffsetDateTime.class
+                        ),
+                        resultSet.getString(
+                            "credential_status"
+                        ),
+                        resultSet.getObject(
+                            "credential_expires_at",
+                            OffsetDateTime.class
+                        ),
+                        resultSet.getObject(
+                            "student_id",
+                            UUID.class
+                        ),
+                        resultSet.getString(
+                            "student_number"
+                        ),
+                        resultSet.getString(
+                            "program"
+                        ),
+                        resultSet.getString(
+                            "level"
+                        ),
+                        resultSet.getString(
+                            "group_name"
+                        ),
+                        resultSet.getString(
+                            "photo_url"
+                        ),
+                        resultSet.getString(
+                            "enrollment_status"
+                        ),
+                        resultSet.getString(
+                            "student_user_status"
+                        ),
+                        resultSet.getBoolean(
+                            "campus_active"
+                        )
+                    ),
+                fingerprint,
+                organizationId,
+                organizationId
+            );
+
+        if (passes.size() > 1) {
+
+            throw new IllegalStateException(
+                "Food Pass token lookup returned multiple rows."
+            );
+        }
+
+        return passes
+            .stream()
+            .findFirst();
+    }
+
+    private void validateFoodPassCredential(
+        FoodPassCandidate candidate,
+        UUID terminalId,
+        UUID actorId,
+        String fingerprint
+    ) {
+
+        String credentialStatus =
+            candidate.credentialStatus();
+
+        if (
+            "REVOKED".equals(
+                credentialStatus
+            )
+        ) {
+
+            rejectFoodPass(
+                candidate.foodPassId(),
+                terminalId,
+                actorId,
+                fingerprint,
+                ScanErrorCode.QR_REVOKED,
+                "Food Pass credential has been revoked."
+            );
+        }
+
+        boolean credentialExpiredByStatus =
+            "EXPIRED".equals(
+                credentialStatus
+            );
+
+        boolean credentialExpiredByTime =
+            candidate.credentialExpiresAt() != null
+                && !OffsetDateTime
+                    .now()
+                    .isBefore(
+                        candidate
+                            .credentialExpiresAt()
+                    );
+
+        if (
+            credentialExpiredByStatus
+            || credentialExpiredByTime
+        ) {
+
+            rejectFoodPass(
+                candidate.foodPassId(),
+                terminalId,
+                actorId,
+                fingerprint,
+                ScanErrorCode.QR_EXPIRED,
+                "Food Pass credential has expired."
+            );
+        }
+
+        if (
+            !"ACTIVE".equals(
+                credentialStatus
+            )
+        ) {
+
+            rejectFoodPass(
+                candidate.foodPassId(),
+                terminalId,
+                actorId,
+                fingerprint,
+                ScanErrorCode.INVALID_QR,
+                "Food Pass credential is not active."
+            );
+        }
+
+        if (
+            "PENDING_ISSUE".equals(
+                candidate.foodPassStatus()
+            )
+        ) {
+
+            rejectFoodPass(
+                candidate.foodPassId(),
+                terminalId,
+                actorId,
+                fingerprint,
+                ScanErrorCode.INVALID_QR,
+                "Food Pass has not been issued yet."
+            );
+        }
+
+        boolean supportedStatus =
+            switch (
+                candidate.foodPassStatus()
+            ) {
+                case "ACTIVE",
+                     "BLOCKED",
+                     "LOST",
+                     "REVOKED",
+                     "EXPIRED",
+                     "REPLACED" ->
+                    true;
+
+                default ->
+                    false;
+            };
+
+        if (!supportedStatus) {
+
+            throw new IllegalStateException(
+                "Unsupported Food Pass status: "
+                    + candidate.foodPassStatus()
+            );
+        }
+
+        boolean studentActive =
+            "ACTIVE".equals(
+                candidate.enrollmentStatus()
+            )
+                && "ACTIVE".equals(
+                    candidate.studentUserStatus()
+                )
+                && candidate.campusActive();
+
+        if (!studentActive) {
+
+            rejectFoodPass(
+                candidate.foodPassId(),
+                terminalId,
+                actorId,
+                fingerprint,
+                ScanErrorCode.INVALID_QR,
+                "Food Pass student is not active."
+            );
+        }
+    }
+
+    private FoodPassResponse foodPassResponse(
+        FoodPassCandidate candidate
+    ) {
+
+        String effectiveStatus =
+            candidate.foodPassStatus();
+
+        boolean expiredByTime =
+            candidate.foodPassExpiresAt() != null
+                && !OffsetDateTime
+                    .now()
+                    .isBefore(
+                        candidate
+                            .foodPassExpiresAt()
+                    );
+
+        if (
+            expiredByTime
+            && "ACTIVE".equals(
+                effectiveStatus
+            )
+        ) {
+
+            effectiveStatus =
+                "EXPIRED";
+        }
+
+        StudentSummary student =
+            new StudentSummary(
+                candidate.studentId(),
+                candidate.studentNumber(),
+                candidate.program(),
+                candidate.level(),
+                candidate.groupName(),
+                candidate.photoUrl()
+            );
+
+        return new FoodPassResponse(
+            candidate.foodPassId(),
+            candidate.cardNumber(),
+            effectiveStatus,
+            candidate.foodPassExpiresAt(),
+            student
+        );
+    }
+
+    private void rejectFoodPass(
+        UUID foodPassId,
+        UUID terminalId,
+        UUID actorId,
+        String fingerprint,
+        ScanErrorCode errorCode,
+        String message
+    ) {
+
+        audit(
+            terminalId,
+            actorId,
+            "FOOD_PASS",
+            "REFUSED",
+            foodPassId,
+            fingerprint,
+            errorCode.name()
+        );
+
+        throw new ScanException(
+            errorCode,
+            message
+        );
     }
 
     private Optional<OrderCredential> orderCredential(
@@ -1083,6 +1454,25 @@ public class ScanService {
         BigDecimal packQuantity,
         String variantName,
         Boolean variantActive
+    ) {
+    }
+
+    private record FoodPassCandidate(
+        UUID foodPassId,
+        String cardNumber,
+        String foodPassStatus,
+        OffsetDateTime foodPassExpiresAt,
+        String credentialStatus,
+        OffsetDateTime credentialExpiresAt,
+        UUID studentId,
+        String studentNumber,
+        String program,
+        String level,
+        String groupName,
+        String photoUrl,
+        String enrollmentStatus,
+        String studentUserStatus,
+        boolean campusActive
     ) {
     }
 

@@ -307,6 +307,23 @@ public class Order {
         return slotId;
     }
 
+    public void selectSlot(
+        UUID slotId
+    ) {
+
+        if (
+            status
+                != OrderStatus.DRAFT
+        ) {
+            throw new IllegalStateException(
+                "Only a DRAFT order can change its slot."
+            );
+        }
+
+        this.slotId =
+            slotId;
+    }
+
     public BigDecimal getSubtotal() {
         return subtotal;
     }

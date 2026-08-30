@@ -13,6 +13,8 @@ public record UpsertOrderRequest(
     @NotNull
     UUID locationId,
 
+    UUID slotId,
+
     @Pattern(
         regexp = "^[A-Za-z]{3}$"
     )
@@ -28,4 +30,23 @@ public record UpsertOrderRequest(
         UpsertOrderItemRequest
     > items
 ) {
+
+    /*
+     * Backward-compatible constructor for existing internal
+     * callers such as direct POS sales, which do not use slots.
+     */
+    public UpsertOrderRequest(
+        UUID locationId,
+        String currency,
+        String customerNote,
+        List<UpsertOrderItemRequest> items
+    ) {
+        this(
+            locationId,
+            null,
+            currency,
+            customerNote,
+            items
+        );
+    }
 }

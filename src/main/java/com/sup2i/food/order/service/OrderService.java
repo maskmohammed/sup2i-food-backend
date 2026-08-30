@@ -1,5 +1,9 @@
 package com.sup2i.food.order.service;
 
+import com.sup2i.food.slot.api.dto.TimeSlotResponse;
+import com.sup2i.food.slot.service.TimeSlotService;
+import com.sup2i.food.slot.service.VirtualQueueService;
+
 import com.sup2i.food.catalog.domain.Ingredient;
 import com.sup2i.food.catalog.domain.Product;
 import com.sup2i.food.catalog.domain.ProductVariant;
@@ -125,6 +129,8 @@ public class OrderService {
     private final StockReservationRepository reservationRepository;
 
     private final InventoryAlertService inventoryAlertService;
+    private final TimeSlotService timeSlotService;
+    private final VirtualQueueService virtualQueueService;
     private final JdbcTemplate jdbcTemplate;
 
     public OrderService(
@@ -144,6 +150,8 @@ public class OrderService {
         OrderStatusHistoryRepository historyRepository,
         StockReservationRepository reservationRepository,
         InventoryAlertService inventoryAlertService,
+        TimeSlotService timeSlotService,
+        VirtualQueueService virtualQueueService,
         JdbcTemplate jdbcTemplate
     ) {
         this.userRepository =
@@ -194,6 +202,12 @@ public class OrderService {
         this.inventoryAlertService =
             inventoryAlertService;
 
+        this.timeSlotService =
+            timeSlotService;
+
+        this.virtualQueueService =
+            virtualQueueService;
+
         this.jdbcTemplate =
             jdbcTemplate;
     }
@@ -219,6 +233,19 @@ public class OrderService {
                 request.locationId(),
                 context.organizationId()
             );
+
+        if (
+            request.slotId()
+                != null
+        ) {
+
+            timeSlotService
+                .validateSelection(
+                    actorId,
+                    request.slotId(),
+                    location.getId()
+                );
+        }
 
         Optional<Order> existingOptional =
             orderRepository
@@ -324,7 +351,8 @@ public class OrderService {
             !created
             && sameDraft(
                 order,
-                snapshot
+                snapshot,
+                request.slotId()
             )
         ) {
             return new OrderMutationResponse(
@@ -351,6 +379,10 @@ public class OrderService {
             BigDecimal.ZERO
                 .setScale(2),
             snapshot.total()
+        );
+
+        order.selectSlot(
+            request.slotId()
         );
 
         try {
@@ -473,6 +505,20 @@ public class OrderService {
             validateStoredLine(item);
         }
 
+        if (
+            order.getSlotId()
+                != null
+        ) {
+
+            timeSlotService.reserve(
+                actorId,
+                order.getId(),
+                order.getSlotId(),
+                order.getLocation()
+                    .getId()
+            );
+        }
+
         OrderStatus from =
             order.getStatus();
 
@@ -552,10 +598,19 @@ public class OrderService {
         }
 
         OffsetDateTime expiresAt =
-            OffsetDateTime.now()
-                .plusMinutes(
-                    PAYMENT_TTL_MINUTES
-                );
+            order.getSlotId()
+                == null
+                    ? OffsetDateTime.now()
+                        .plusMinutes(
+                            PAYMENT_TTL_MINUTES
+                        )
+                    : timeSlotService
+                        .paymentDeadline(
+                            actorId,
+                            order.getSlotId(),
+                            order.getLocation()
+                                .getId()
+                        );
 
         reserveStock(
             order,
@@ -653,6 +708,27 @@ public class OrderService {
                 );
         }
 
+        boolean submittedWithSlot =
+            from
+                == OrderStatus.CREATED
+            || from
+                == OrderStatus.AWAITING_PAYMENT;
+
+        if (
+            submittedWithSlot
+            && order.getSlotId()
+                != null
+        ) {
+
+            timeSlotService.releaseCancelled(
+                actorId,
+                order.getId(),
+                order.getSlotId(),
+                order.getLocation()
+                    .getId()
+            );
+        }
+
         OffsetDateTime now =
             OffsetDateTime.now();
 
@@ -740,6 +816,20 @@ public class OrderService {
                 context.actor(),
                 true
             );
+
+        if (
+            order.getSlotId()
+                != null
+        ) {
+
+            timeSlotService.releaseExpired(
+                actorId,
+                order.getId(),
+                order.getSlotId(),
+                order.getLocation()
+                    .getId()
+            );
+        }
 
         OrderStatus from =
             order.getStatus();
@@ -2019,8 +2109,18 @@ public class OrderService {
 
     private boolean sameDraft(
         Order order,
-        DraftSnapshot snapshot
+        DraftSnapshot snapshot,
+        UUID slotId
     ) {
+
+        if (
+            !java.util.Objects.equals(
+                order.getSlotId(),
+                slotId
+            )
+        ) {
+            return false;
+        }
 
         if (
             !order.getCurrency()
@@ -2505,11 +2605,37 @@ public class OrderService {
                     )
                     .toList();
 
+        TimeSlotResponse slot =
+            order.getSlotId()
+                == null
+                    ? null
+                    : timeSlotService
+                        .findForOrder(
+                            order.getLocation()
+                                .getCampus()
+                                .getOrganization()
+                                .getId(),
+                            order.getSlotId(),
+                            order.getLocation()
+                                .getId()
+                        );
+
+        var queue =
+            virtualQueueService.estimate(
+                order.getLocation()
+                    .getCampus()
+                    .getOrganization()
+                    .getId(),
+                order.getId(),
+                order.getStatus()
+            );
+
         return new OrderResponse(
             order.getId(),
             order.getOrderNumber(),
             order.getLocation()
                 .getId(),
+            slot,
             order.getStudent()
                 == null
                     ? null
@@ -2526,6 +2652,7 @@ public class OrderService {
             order.getTotal(),
             order.getCurrency(),
             order.getPaymentExpiresAt(),
+            queue,
             order.getCustomerNote(),
             order.getVersion(),
             order.getCreatedAt(),

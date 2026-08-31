@@ -1,4 +1,6 @@
 package com.sup2i.food.payment.service;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.sup2i.food.notification.service.OrderNotificationDispatchService;
 
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
@@ -100,6 +102,17 @@ public class PaymentService {
         paidOrderKitchenQueue;
 
     private final JdbcTemplate jdbcTemplate;
+    private OrderNotificationDispatchService
+        notificationDispatchService;
+
+    @Autowired
+    void setNotificationDispatchService(
+        OrderNotificationDispatchService notificationDispatchService
+    ) {
+        this.notificationDispatchService =
+            notificationDispatchService;
+    }
+
 
     public PaymentService(
         UserRepository userRepository,
@@ -387,6 +400,13 @@ public class PaymentService {
             order.getId(),
             now
         );
+
+        if (notificationDispatchService != null) {
+            notificationDispatchService
+                .paymentConfirmedAfterCommit(
+                    order
+                );
+        }
 
         return result(
             payment,

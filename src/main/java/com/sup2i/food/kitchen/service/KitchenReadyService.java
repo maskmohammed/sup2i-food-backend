@@ -1,4 +1,6 @@
 package com.sup2i.food.kitchen.service;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.sup2i.food.notification.service.OrderNotificationDispatchService;
 
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
@@ -50,6 +52,17 @@ public class KitchenReadyService {
     private final KitchenOrderReadinessPolicy
         readinessPolicy =
             new KitchenOrderReadinessPolicy();
+    private OrderNotificationDispatchService
+        notificationDispatchService;
+
+    @Autowired
+    void setNotificationDispatchService(
+        OrderNotificationDispatchService notificationDispatchService
+    ) {
+        this.notificationDispatchService =
+            notificationDispatchService;
+    }
+
 
     public KitchenReadyService(
         UserRepository userRepository,
@@ -313,6 +326,13 @@ public class KitchenReadyService {
             order.markReady(
                 at
             );
+
+            if (notificationDispatchService != null) {
+                notificationDispatchService
+                    .orderReadyAfterCommit(
+                        order
+                    );
+            }
 
             orderRepository
                 .saveAndFlush(

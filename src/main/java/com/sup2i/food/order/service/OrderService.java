@@ -2315,11 +2315,16 @@ public class OrderService {
                     student.getId()
                 );
 
+        boolean supportedStudentType =
+            order.getOrderType()
+                == OrderType.MOBILE_SNACK
+            || order.getOrderType()
+                == OrderType.GROUP_ORDER;
+
         boolean mobile =
             order.getSource()
                 == OrderSource.MOBILE
-            && order.getOrderType()
-                == OrderType.MOBILE_SNACK;
+            && supportedStudentType;
 
         if (
             !owned

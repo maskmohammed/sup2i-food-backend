@@ -13,9 +13,11 @@ import com.sup2i.food.catalog.domain.MenuItem;
 import com.sup2i.food.catalog.domain.MenuPricingMode;
 import com.sup2i.food.catalog.domain.MenuSection;
 import com.sup2i.food.catalog.domain.Product;
+import com.sup2i.food.catalog.domain.ProductType;
 import com.sup2i.food.catalog.domain.ProductVariant;
 import com.sup2i.food.catalog.exception.CatalogConflictException;
 import com.sup2i.food.catalog.exception.CatalogNotFoundException;
+import com.sup2i.food.catalog.exception.CatalogValidationException;
 import com.sup2i.food.catalog.exception.ProductUnavailableException;
 import com.sup2i.food.catalog.repository.MenuItemRepository;
 import com.sup2i.food.catalog.repository.MenuRepository;
@@ -25,6 +27,7 @@ import com.sup2i.food.catalog.repository.ProductVariantRepository;
 import com.sup2i.food.identity.domain.User;
 import com.sup2i.food.identity.repository.UserRepository;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +48,7 @@ public class CatalogMenuService {
     private final MenuRepository menuRepository;
     private final MenuSectionRepository sectionRepository;
     private final MenuItemRepository itemRepository;
+    private final JdbcTemplate jdbcTemplate;
 
     public CatalogMenuService(
         UserRepository userRepository,
@@ -52,7 +56,8 @@ public class CatalogMenuService {
         ProductVariantRepository variantRepository,
         MenuRepository menuRepository,
         MenuSectionRepository sectionRepository,
-        MenuItemRepository itemRepository
+        MenuItemRepository itemRepository,
+        JdbcTemplate jdbcTemplate
     ) {
         this.userRepository = userRepository;
         this.productRepository = productRepository;
@@ -60,6 +65,7 @@ public class CatalogMenuService {
         this.menuRepository = menuRepository;
         this.sectionRepository = sectionRepository;
         this.itemRepository = itemRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -77,6 +83,10 @@ public class CatalogMenuService {
                 productId,
                 actor.getOrganization().getId()
             );
+
+        requireMenuProduct(
+            product
+        );
 
         Menu menu =
             menuRepository
@@ -232,6 +242,11 @@ public class CatalogMenuService {
                 request.productId(),
                 organizationId
             );
+
+        requireAcyclicMenuItem(
+            menuProduct.getId(),
+            itemProduct.getId()
+        );
 
         ProductVariant variant = null;
 
@@ -418,6 +433,11 @@ public class CatalogMenuService {
                 request.productId(),
                 organizationId
             );
+
+        requireAcyclicMenuItem(
+            menuProduct.getId(),
+            itemProduct.getId()
+        );
 
         ProductVariant variant = null;
 
@@ -691,15 +711,98 @@ public class CatalogMenuService {
         UUID productId
     ) {
 
-        return menuRepository
-            .findByProduct_Id(
-                productId
-            )
-            .orElseThrow(() ->
-                new CatalogNotFoundException(
-                    "Menu does not exist."
+        Menu menu =
+            menuRepository
+                .findByProduct_Id(
+                    productId
                 )
+                .orElseThrow(() ->
+                    new CatalogNotFoundException(
+                        "Menu does not exist."
+                    )
+                );
+
+        requireMenuProduct(
+            menu.getProduct()
+        );
+
+        return menu;
+    }
+
+    private void requireMenuProduct(
+        Product product
+    ) {
+
+        if (
+            product.getProductType()
+                != ProductType.MENU
+        ) {
+            throw new CatalogValidationException(
+                "Only MENU products can own a menu."
             );
+        }
+    }
+
+    private void requireAcyclicMenuItem(
+        UUID menuProductId,
+        UUID itemProductId
+    ) {
+
+        if (
+            menuProductId.equals(
+                itemProductId
+            )
+        ) {
+            throw new CatalogValidationException(
+                "A menu cannot contain itself."
+            );
+        }
+
+        Boolean createsCycle =
+            jdbcTemplate.queryForObject(
+                """
+                WITH RECURSIVE descendants(product_id) AS (
+                    SELECT
+                        mi.product_id
+                    FROM menus m
+                    JOIN menu_sections ms
+                      ON ms.menu_id = m.id
+                    JOIN menu_items mi
+                      ON mi.menu_section_id = ms.id
+                    WHERE m.product_id = ?
+
+                    UNION
+
+                    SELECT
+                        mi.product_id
+                    FROM descendants d
+                    JOIN menus m
+                      ON m.product_id = d.product_id
+                    JOIN menu_sections ms
+                      ON ms.menu_id = m.id
+                    JOIN menu_items mi
+                      ON mi.menu_section_id = ms.id
+                )
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM descendants
+                    WHERE product_id = ?
+                )
+                """,
+                Boolean.class,
+                itemProductId,
+                menuProductId
+            );
+
+        if (
+            Boolean.TRUE.equals(
+                createsCycle
+            )
+        ) {
+            throw new CatalogValidationException(
+                "Menu composition cannot create a recursive cycle."
+            );
+        }
     }
 
     private MenuItemResponse toItemResponse(

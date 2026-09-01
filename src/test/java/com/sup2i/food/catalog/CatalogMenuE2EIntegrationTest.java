@@ -395,6 +395,59 @@ class CatalogMenuE2EIntegrationTest {
             );
     }
 
+    @Test
+    void nonMenuProductCannotOwnMenu()
+        throws Exception {
+
+        UUID productId =
+            insertOwnedProduct(
+                "MENU-TYPE-GATE",
+                "Not A Menu"
+            );
+
+        mockMvc.perform(
+                put(
+                    "/api/v1/admin/products/{productId}/menu",
+                    productId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "pricingMode": "FIXED",
+                          "active": true
+                        }
+                        """
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+
+        Long menuCount =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM menus
+                WHERE product_id = ?
+                """,
+                Long.class,
+                productId
+            );
+
+        assertThat(menuCount)
+            .isZero();
+    }
     // =========================================================
     // SECTIONS
     // =========================================================
@@ -701,6 +754,209 @@ class CatalogMenuE2EIntegrationTest {
             .isEqualTo(variantId);
     }
 
+    @Test
+    void menuCannotContainItself()
+        throws Exception {
+
+        UUID menuProductId =
+            insertOwnedMenuProduct(
+                "MENU-SELF-CYCLE"
+            );
+
+        UUID menuId =
+            insertMenu(
+                menuProductId,
+                "FIXED",
+                true
+            );
+
+        UUID sectionId =
+            insertMenuSection(
+                menuId,
+                "SELF",
+                "Self",
+                0,
+                1,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}/items",
+                    menuProductId,
+                    sectionId
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "productId": "%s",
+                          "displayOrder": 0
+                        }
+                        """.formatted(
+                            menuProductId
+                        )
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+
+        Long itemCount =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM menu_items
+                WHERE menu_section_id = ?
+                  AND product_id = ?
+                """,
+                Long.class,
+                sectionId,
+                menuProductId
+            );
+
+        assertThat(itemCount)
+            .isZero();
+    }
+
+    @Test
+    void menuCannotCreateTransitiveCycle()
+        throws Exception {
+
+        UUID menuProductA =
+            insertOwnedMenuProduct(
+                "MENU-CYCLE-A"
+            );
+
+        UUID menuProductB =
+            insertOwnedMenuProduct(
+                "MENU-CYCLE-B"
+            );
+
+        UUID menuA =
+            insertMenu(
+                menuProductA,
+                "FIXED",
+                true
+            );
+
+        UUID menuB =
+            insertMenu(
+                menuProductB,
+                "FIXED",
+                true
+            );
+
+        UUID sectionA =
+            insertMenuSection(
+                menuA,
+                "A",
+                "Menu A",
+                0,
+                1,
+                0,
+                true
+            );
+
+        UUID sectionB =
+            insertMenuSection(
+                menuB,
+                "B",
+                "Menu B",
+                0,
+                1,
+                0,
+                true
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}/items",
+                    menuProductA,
+                    sectionA
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "productId": "%s",
+                          "active": false,
+                          "displayOrder": 0
+                        }
+                        """.formatted(
+                            menuProductB
+                        )
+                    )
+            )
+            .andExpect(
+                status().isCreated()
+            );
+
+        mockMvc.perform(
+                post(
+                    "/api/v1/admin/products/{productId}/menu/sections/{sectionId}/items",
+                    menuProductB,
+                    sectionB
+                )
+                    .header(
+                        "Authorization",
+                        bearer("product.write")
+                    )
+                    .contentType(
+                        MediaType.APPLICATION_JSON
+                    )
+                    .content(
+                        """
+                        {
+                          "productId": "%s",
+                          "displayOrder": 0
+                        }
+                        """.formatted(
+                            menuProductA
+                        )
+                    )
+            )
+            .andExpect(
+                status().isBadRequest()
+            )
+            .andExpect(
+                jsonPath("$.code")
+                    .value("VALIDATION_ERROR")
+            );
+
+        Long reverseEdgeCount =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM menu_items
+                WHERE menu_section_id = ?
+                  AND product_id = ?
+                """,
+                Long.class,
+                sectionB,
+                menuProductA
+            );
+
+        assertThat(reverseEdgeCount)
+            .isZero();
+    }
     @Test
     void zeroQuantityReturnsValidationError()
         throws Exception {

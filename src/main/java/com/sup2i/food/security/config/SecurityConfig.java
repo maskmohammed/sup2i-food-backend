@@ -165,10 +165,10 @@ public class SecurityConfig {
                 List.of(
                     "Authorization",
                     "Content-Type",
-                    "X-Request-ID"
+                    "X-Request-ID",
+                    "Idempotency-Key"
                 )
             );
-
             configuration.setExposedHeaders(
                 List.of(
                     "X-Request-ID"

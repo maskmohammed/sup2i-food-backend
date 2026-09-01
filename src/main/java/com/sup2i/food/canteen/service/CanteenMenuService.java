@@ -13,7 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -148,10 +150,28 @@ public class CanteenMenuService {
                 parameters
             );
 
+        Map<
+            UUID,
+            List<CanteenProductSummaryResponse>
+        > productsByMenu =
+            productsByMenu(
+                rows
+            );
+
         List<CanteenMenuResponse> responses =
             new ArrayList<>();
 
         for (MenuRow row : rows) {
+
+            List<CanteenProductSummaryResponse>
+                menuProducts =
+                    productsByMenu.get(
+                        row.id()
+                    );
+
+            if (menuProducts == null) {
+                menuProducts = List.of();
+            }
 
             responses.add(
                 new CanteenMenuResponse(
@@ -161,11 +181,7 @@ public class CanteenMenuService {
                     row.title(),
                     row.description(),
                     row.status(),
-                    products(
-                        row.id(),
-                        row.locationId(),
-                        row.date()
-                    )
+                    menuProducts
                 )
             );
         }
@@ -175,16 +191,33 @@ public class CanteenMenuService {
         );
     }
 
-    private List<CanteenProductSummaryResponse>
-        products(
-            UUID menuId,
-            UUID locationId,
-            LocalDate menuDate
-        ) {
+    private Map<
+        UUID,
+        List<CanteenProductSummaryResponse>
+    > productsByMenu(
+        List<MenuRow> menus
+    ) {
 
-        return jdbcTemplate.query(
+        if (
+            menus == null
+                || menus.isEmpty()
+        ) {
+            return Map.of();
+        }
+
+        String placeholders =
+            String.join(
+                ",",
+                java.util.Collections.nCopies(
+                    menus.size(),
+                    "?"
+                )
+            );
+
+        String sql =
             """
             SELECT
+                cmc.canteen_menu_id,
                 p.id,
                 p.category_id,
                 p.sku,
@@ -203,19 +236,21 @@ public class CanteenMenuService {
                     AND (
                         pls.allowed_days IS NULL
                         OR EXTRACT(
-                            ISODOW FROM CAST(? AS DATE)
+                            ISODOW FROM cm.menu_date
                         )::SMALLINT =
                             ANY(pls.allowed_days)
                     )
                 ) AS available
             FROM canteen_menu_choices cmc
+            JOIN canteen_menus cm
+              ON cm.id = cmc.canteen_menu_id
             JOIN products p
               ON p.id = cmc.product_id
             JOIN categories category
               ON category.id = p.category_id
             LEFT JOIN product_location_settings pls
               ON pls.product_id = p.id
-             AND pls.location_id = ?
+             AND pls.location_id = cm.location_id
             LEFT JOIN LATERAL (
                 SELECT pb.barcode
                 FROM product_barcodes pb
@@ -228,56 +263,126 @@ public class CanteenMenuService {
                 LIMIT 1
             ) primary_barcode
               ON TRUE
-            WHERE cmc.canteen_menu_id = ?
+            WHERE cmc.canteen_menu_id IN (
+            """
+                + placeholders
+                + """
+            )
               AND cmc.is_active = TRUE
             ORDER BY
+                cm.menu_date ASC,
+                cm.id ASC,
                 cmc.display_order ASC,
                 p.name ASC,
                 p.id ASC
-            """,
+            """;
+
+        Object[] parameters =
+            menus.stream()
+                .map(MenuRow::id)
+                .toArray();
+
+        List<MenuProductRow> productRows =
+            jdbcTemplate.query(
+                sql,
+                (
+                    resultSet,
+                    rowNumber
+                ) ->
+                    new MenuProductRow(
+                        resultSet.getObject(
+                            "canteen_menu_id",
+                            UUID.class
+                        ),
+                        new CanteenProductSummaryResponse(
+                            resultSet.getObject(
+                                "id",
+                                UUID.class
+                            ),
+                            resultSet.getObject(
+                                "category_id",
+                                UUID.class
+                            ),
+                            resultSet.getString(
+                                "sku"
+                            ),
+                            resultSet.getString(
+                                "barcode"
+                            ),
+                            resultSet.getString(
+                                "name"
+                            ),
+                            resultSet.getString(
+                                "image_url"
+                            ),
+                            resultSet.getObject(
+                                "base_price",
+                                BigDecimal.class
+                            ),
+                            "MAD",
+                            resultSet.getBoolean(
+                                "available"
+                            ),
+                            resultSet.getBoolean(
+                                "is_active"
+                            )
+                        )
+                    ),
+                parameters
+            );
+
+        Map<
+            UUID,
+            List<CanteenProductSummaryResponse>
+        > result =
+            new LinkedHashMap<>();
+
+        for (MenuRow menu : menus) {
+
+            result.put(
+                menu.id(),
+                new ArrayList<>()
+            );
+        }
+
+        for (MenuProductRow row : productRows) {
+
+            List<CanteenProductSummaryResponse>
+                menuProducts =
+                    result.get(
+                        row.menuId()
+                    );
+
+            if (menuProducts == null) {
+
+                throw new IllegalStateException(
+                    "Product query returned an unexpected menu."
+                );
+            }
+
+            menuProducts.add(
+                row.product()
+            );
+        }
+
+        result.replaceAll(
             (
-                resultSet,
-                rowNumber
+                menuId,
+                menuProducts
             ) ->
-                new CanteenProductSummaryResponse(
-                    resultSet.getObject(
-                        "id",
-                        UUID.class
-                    ),
-                    resultSet.getObject(
-                        "category_id",
-                        UUID.class
-                    ),
-                    resultSet.getString(
-                        "sku"
-                    ),
-                    resultSet.getString(
-                        "barcode"
-                    ),
-                    resultSet.getString(
-                        "name"
-                    ),
-                    resultSet.getString(
-                        "image_url"
-                    ),
-                    resultSet.getObject(
-                        "base_price",
-                        BigDecimal.class
-                    ),
-                    "MAD",
-                    resultSet.getBoolean(
-                        "available"
-                    ),
-                    resultSet.getBoolean(
-                        "is_active"
-                    )
-                ),
-            menuDate,
-            locationId,
-            menuId
+                List.copyOf(
+                    menuProducts
+                )
         );
+
+        return result;
     }
 
+    private record MenuProductRow(
+        UUID menuId,
+        CanteenProductSummaryResponse product
+    ) {
+    }
     private MenuRow mapMenu(
         java.sql.ResultSet resultSet,
         int rowNumber

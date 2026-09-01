@@ -259,24 +259,39 @@ public class GroupOrderService {
         UUID memberId =
             UUID.randomUUID();
 
+        int inserted;
+
         try {
 
-            jdbcTemplate.update(
-                """
-                INSERT INTO group_order_members(
-                    id,
-                    group_order_id,
-                    student_id,
-                    status
-                )
-                VALUES (?, ?, ?, 'JOINED')
-                """,
-                memberId,
-                group.id(),
-                actor.studentId()
-            );
+            inserted =
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO group_order_members(
+                        id,
+                        group_order_id,
+                        student_id,
+                        status
+                    )
+                    VALUES (?, ?, ?, 'JOINED')
+                    ON CONFLICT (
+                        group_order_id,
+                        student_id
+                    )
+                    DO NOTHING
+                    """,
+                    memberId,
+                    group.id(),
+                    actor.studentId()
+                );
 
         } catch (DataIntegrityViolationException exception) {
+
+            throw new GroupEventConflictException(
+                "Group membership conflicts with an existing resource."
+            );
+        }
+
+        if (inserted == 0) {
 
             GroupOrderMemberResponse replay =
                 findMember(

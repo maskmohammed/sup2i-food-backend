@@ -156,47 +156,66 @@ public class NotificationService {
             }
         }
 
+        int inserted;
+
         try {
 
-            jdbcTemplate.update(
-                """
-                INSERT INTO notifications(
-                    id,
-                    user_id,
+            inserted =
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO notifications(
+                        id,
+                        user_id,
+                        type,
+                        channel,
+                        title,
+                        body,
+                        payload,
+                        status,
+                        priority,
+                        deduplication_key,
+                        scheduled_at,
+                        retry_count,
+                        last_error
+                    )
+                    VALUES(
+                        ?, ?, ?, ?, ?, ?,
+                        CAST(? AS JSONB),
+                        'PENDING',
+                        ?, ?, ?,
+                        0,
+                        NULL
+                    )
+                    ON CONFLICT (
+                        user_id,
+                        channel,
+                        deduplication_key
+                    )
+                    WHERE
+                        deduplication_key IS NOT NULL
+                        AND status IN ('PENDING','SENT')
+                    DO NOTHING
+                    """,
+                    notificationId,
+                    userId,
                     type,
-                    channel,
+                    command.channel().name(),
                     title,
                     body,
-                    payload,
-                    status,
-                    priority,
-                    deduplication_key,
-                    scheduled_at,
-                    retry_count,
-                    last_error
-                )
-                VALUES(
-                    ?, ?, ?, ?, ?, ?,
-                    CAST(? AS JSONB),
-                    'PENDING',
-                    ?, ?, ?,
-                    0,
-                    NULL
-                )
-                """,
-                notificationId,
-                userId,
-                type,
-                command.channel().name(),
-                title,
-                body,
-                payloadJson,
-                priority.name(),
-                deduplicationKey,
-                command.scheduledAt()
-            );
+                    payloadJson,
+                    priority.name(),
+                    deduplicationKey,
+                    command.scheduledAt()
+                );
 
         } catch (DataIntegrityViolationException exception) {
+
+            throw new NotificationConflictException(
+                "Notification conflicts with an existing resource."
+            );
+        }
+
+        if (inserted == 0) {
 
             if (deduplicationKey != null) {
 
@@ -218,7 +237,6 @@ public class NotificationService {
                 "Notification conflicts with an existing resource."
             );
         }
-
         return get(
             organizationId,
             notificationId

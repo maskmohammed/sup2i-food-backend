@@ -2042,6 +2042,38 @@ void configuredSensitiveAccountRequiresSecondFactor()
             jsonPath("$.accessToken")
                 .isNotEmpty()
         );
+
+    /*
+     * Le code de la fenêtre +1 vient d'être
+     * consommé. Son compteur exact doit être
+     * mémorisé immédiatement, avant même que
+     * l'horloge réelle entre dans cette fenêtre.
+     */
+    mockMvc.perform(
+            post("/api/v1/auth/login")
+                .contentType(
+                    MediaType.APPLICATION_JSON
+                )
+                .content(
+                    json(
+                        Map.of(
+                            "email",
+                            EMAIL,
+                            "password",
+                            PASSWORD,
+                            "mfaCode",
+                            nextCode
+                        )
+                    )
+                )
+        )
+        .andExpect(
+            status().isUnauthorized()
+        )
+        .andExpect(
+            jsonPath("$.code")
+                .value("UNAUTHORIZED")
+        );
 }
 
 

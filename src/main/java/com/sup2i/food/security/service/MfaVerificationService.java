@@ -125,6 +125,9 @@ public class MfaVerificationService {
         OffsetDateTime now =
             OffsetDateTime.now();
 
+        OffsetDateTime credentialUsedAt =
+            now;
+
         boolean valid;
 
         if (hasRecovery) {
@@ -156,12 +159,20 @@ public class MfaVerificationService {
                         method.getMethodType()
                     );
 
-                valid =
-                    totpService.verify(
+                TotpService.Verification verification =
+                    totpService.verifyWithCounter(
                         secret,
                         totpCode,
                         method.getLastUsedAt()
                     );
+
+                valid =
+                    verification.valid();
+
+                if (valid) {
+                    credentialUsedAt =
+                        verification.usedAt();
+                }
             }
         }
 
@@ -175,7 +186,9 @@ public class MfaVerificationService {
             );
         }
 
-        method.markUsed(now);
+        method.markUsed(
+            credentialUsedAt
+        );
 
         methodRepository.save(method);
     }

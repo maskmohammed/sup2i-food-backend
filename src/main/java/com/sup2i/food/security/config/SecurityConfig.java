@@ -70,6 +70,12 @@ public class SecurityConfig {
                     .permitAll()
 
                     .requestMatchers(
+                        HttpMethod.GET,
+                        "/api/v1/orders/ready"
+                    )
+                    .permitAll()
+
+                    .requestMatchers(
                         "/actuator/health"
                     )
                     .permitAll()

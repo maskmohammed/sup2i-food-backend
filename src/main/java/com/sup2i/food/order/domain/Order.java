@@ -519,6 +519,67 @@ public class Order {
             at;
     }
 
+    public void markNoShow(
+        OffsetDateTime at
+    ) {
+
+        if (
+            status
+                != OrderStatus.READY
+        ) {
+            throw new IllegalStateException(
+                "Only a READY order can become NO_SHOW."
+            );
+        }
+
+        if (at == null) {
+            throw new IllegalArgumentException(
+                "No-show timestamp is required."
+            );
+        }
+
+        status =
+            OrderStatus.NO_SHOW;
+
+        noShowAt =
+            at;
+    }
+
+    public void markCollected(
+        OffsetDateTime at
+    ) {
+
+        if (status != OrderStatus.READY) {
+
+            throw new IllegalStateException(
+                "Only a READY order can be collected."
+            );
+        }
+
+        status =
+            OrderStatus.COLLECTED;
+
+        collectedAt =
+            at;
+    }
+
+    public void markCompleted(
+        OffsetDateTime at
+    ) {
+
+        if (status != OrderStatus.COLLECTED) {
+
+            throw new IllegalStateException(
+                "Only a COLLECTED order can be completed."
+            );
+        }
+
+        status =
+            OrderStatus.COMPLETED;
+
+        completedAt =
+            at;
+    }
     public void markCancelled(
         OffsetDateTime at
     ) {

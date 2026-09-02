@@ -1,9 +1,9 @@
-package com.sup2i.food.canteen.api;
+package com.sup2i.food.payment.api;
 
-import com.sup2i.food.canteen.exception.CanteenErrorCode;
-import com.sup2i.food.canteen.exception.CanteenException;
 import com.sup2i.food.common.api.ApiErrorResponse;
 import com.sup2i.food.common.api.RequestTrace;
+import com.sup2i.food.payment.exception.RefundErrorCode;
+import com.sup2i.food.payment.exception.RefundException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -16,22 +16,18 @@ import java.time.OffsetDateTime;
 import java.util.Map;
 
 @RestControllerAdvice(
-    assignableTypes = {
-        CanteenController.class,
-        FoodPassController.class
-    }
+    assignableTypes =
+        PaymentRefundController.class
 )
-public class CanteenExceptionHandler {
+public class RefundExceptionHandler {
 
     @ExceptionHandler(
-        CanteenException.class
+        RefundException.class
     )
-    public ResponseEntity<ApiErrorResponse>
-        canteenException(
-            CanteenException exception,
-            HttpServletRequest request
-        ) {
-
+    public ResponseEntity<ApiErrorResponse> refundException(
+        RefundException exception,
+        HttpServletRequest request
+    ) {
         HttpStatus status =
             status(
                 exception.getErrorCode()
@@ -56,43 +52,34 @@ public class CanteenExceptionHandler {
             );
 
         return ResponseEntity
-            .status(status)
+            .status(
+                status
+            )
             .header(
                 RequestTrace.HEADER,
                 traceId
             )
-            .body(response);
+            .body(
+                response
+            );
     }
 
     private HttpStatus status(
-        CanteenErrorCode errorCode
+        RefundErrorCode errorCode
     ) {
-
         return switch (errorCode) {
 
             case VALIDATION_ERROR ->
                 HttpStatus.BAD_REQUEST;
 
-            case RESOURCE_NOT_FOUND,
-                 INVALID_QR ->
+            case RESOURCE_NOT_FOUND ->
                 HttpStatus.NOT_FOUND;
 
-            case MEAL_NOT_ALLOWED ->
+            case REFUND_AMOUNT_EXCEEDED ->
                 HttpStatus.UNPROCESSABLE_ENTITY;
 
             case IDEMPOTENCY_CONFLICT,
-                 CANTEEN_RESERVATION_CLOSED,
-                 CANTEEN_ALREADY_RESERVED,
-                 FOOD_PASS_BLOCKED,
-                 FOOD_PASS_LOST,
-                 FOOD_PASS_REVOKED,
-                 FOOD_PASS_EXPIRED,
-                 STUDENT_INACTIVE,
-                 SUBSCRIPTION_INACTIVE,
-                 ENTITLEMENT_EXPIRED,
-                 QUOTA_EXHAUSTED,
-                 DAILY_LIMIT_REACHED,
-                 MEAL_ALREADY_USED ->
+                 PAYMENT_NOT_REFUNDABLE ->
                 HttpStatus.CONFLICT;
         };
     }

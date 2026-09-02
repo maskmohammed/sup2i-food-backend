@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -74,6 +75,48 @@ public class OrderController {
         );
     }
 
+
+    @PostMapping("/{orderId}/confirm")
+    public OrderResponse confirm(
+        @PathVariable UUID orderId,
+        @RequestHeader(
+            name = "Idempotency-Key",
+            required = true
+        )
+        String idempotencyKey,
+        JwtAuthenticationToken authentication
+    ) {
+
+        return service.confirm(
+            userId(
+                authentication
+            ),
+            orderId,
+            idempotencyKey
+        ).order();
+    }
+    @PostMapping("/{orderId}/collect")
+    @PreAuthorize(
+        "hasAuthority('order.collect')"
+    )
+    public OrderResponse collect(
+        @PathVariable UUID orderId,
+        @RequestHeader(
+            name = "Idempotency-Key",
+            required = true
+        )
+        String idempotencyKey,
+        JwtAuthenticationToken authentication
+    ) {
+
+        return service.collect(
+            userId(
+                authentication
+            ),
+            orderId,
+            idempotencyKey
+        ).order();
+    }
     @PostMapping("/{orderId}/cancel")
     public OrderMutationResponse cancel(
         @PathVariable UUID orderId,

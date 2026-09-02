@@ -17,21 +17,19 @@ import java.util.Map;
 
 @RestControllerAdvice(
     assignableTypes = {
-        CanteenController.class,
-        FoodPassController.class
+        AdminFoodPassReplacementController.class,
+        CanteenCancellationController.class
     }
 )
-public class CanteenExceptionHandler {
+public class P5B2CanteenCommandExceptionHandler {
 
     @ExceptionHandler(
         CanteenException.class
     )
-    public ResponseEntity<ApiErrorResponse>
-        canteenException(
-            CanteenException exception,
-            HttpServletRequest request
-        ) {
-
+    public ResponseEntity<ApiErrorResponse> canteenException(
+        CanteenException exception,
+        HttpServletRequest request
+    ) {
         HttpStatus status =
             status(
                 exception.getErrorCode()
@@ -56,18 +54,21 @@ public class CanteenExceptionHandler {
             );
 
         return ResponseEntity
-            .status(status)
+            .status(
+                status
+            )
             .header(
                 RequestTrace.HEADER,
                 traceId
             )
-            .body(response);
+            .body(
+                response
+            );
     }
 
     private HttpStatus status(
         CanteenErrorCode errorCode
     ) {
-
         return switch (errorCode) {
 
             case VALIDATION_ERROR ->

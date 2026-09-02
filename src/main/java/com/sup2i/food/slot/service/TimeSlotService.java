@@ -264,6 +264,90 @@ public class TimeSlotService {
         );
     }
 
+    @Transactional
+    public TimeSlotResponse releaseExpiredSystem(
+        UUID organizationId,
+        UUID orderId,
+        UUID slotId,
+        UUID expectedLocationId
+    ) {
+
+        if (organizationId == null) {
+            throw new IllegalArgumentException(
+                "organizationId is required."
+            );
+        }
+
+        TimeSlotRow slot =
+            lockExistingSlot(
+                organizationId,
+                slotId,
+                expectedLocationId
+            );
+
+        UUID reservationId =
+            lockActiveReservation(
+                organizationId,
+                orderId,
+                slot.id()
+            );
+
+        if (
+            slot.reservedCount()
+                == 0
+        ) {
+            throw new IllegalStateException(
+                "Active slot reservation exists with reserved_count = 0."
+            );
+        }
+
+        int newReservedCount =
+            slot.reservedCount()
+                - 1;
+
+        TimeSlotStatus nextStatus =
+            slot.status();
+
+        if (newReservedCount == 0) {
+
+            if (
+                slot.status()
+                    != TimeSlotStatus.CLOSED
+            ) {
+                nextStatus =
+                    TimeSlotStatus.OPEN;
+            }
+        }
+        else {
+
+            if (
+                slot.status()
+                    == TimeSlotStatus.FULL
+            ) {
+                nextStatus =
+                    TimeSlotStatus.ALMOST_FULL;
+            }
+        }
+
+        updateCapacity(
+            slot.id(),
+            newReservedCount,
+            nextStatus
+        );
+
+        closeReservation(
+            reservationId,
+            "EXPIRED",
+            "ORDER_EXPIRED"
+        );
+
+        return response(
+            slot,
+            newReservedCount,
+            nextStatus
+        );
+    }
+
     private TimeSlotResponse release(
         UUID actorId,
         UUID orderId,

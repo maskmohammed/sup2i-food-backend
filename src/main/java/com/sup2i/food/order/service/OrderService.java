@@ -1,5 +1,6 @@
 package com.sup2i.food.order.service;
 
+import com.sup2i.food.configuration.service.ConfigurationGovernanceService;
 import com.sup2i.food.slot.api.dto.TimeSlotResponse;
 import com.sup2i.food.slot.service.TimeSlotService;
 import com.sup2i.food.slot.service.VirtualQueueService;
@@ -31,6 +32,8 @@ import com.sup2i.food.inventory.repository.StockLocationRepository;
 import com.sup2i.food.inventory.service.InventoryAlertService;
 import com.sup2i.food.order.api.dto.OrderItemResponse;
 import com.sup2i.food.order.api.dto.OrderMutationResponse;
+import com.sup2i.food.order.api.dto.PagedOrdersResponse;
+import com.sup2i.food.order.api.dto.ReadyOrderResponse;
 import com.sup2i.food.order.api.dto.OrderResponse;
 import com.sup2i.food.order.api.dto.OrderStatusHistoryResponse;
 import com.sup2i.food.order.api.dto.StockReservationResponse;
@@ -76,13 +79,17 @@ import java.util.UUID;
 @Service
 public class OrderService {
 
-    private static final int
-        PAYMENT_TTL_MINUTES =
-            15;
+    private static final String
+        PAYMENT_TTL_SETTING =
+            "ORDER_PAYMENT_TTL_MINUTES";
 
-    private static final int
-        MAX_ACTIVE_ORDERS =
-            2;
+    private static final String
+        MAX_ACTIVE_ORDERS_SETTING =
+            "ORDER_MAX_ACTIVE_ORDERS";
+
+    private static final String
+        NO_SHOW_TOLERANCE_SETTING =
+            "ORDER_NO_SHOW_TOLERANCE_MINUTES";
 
     private static final String
         RESERVATION_REFERENCE =
@@ -128,6 +135,9 @@ public class OrderService {
     private final OrderStatusHistoryRepository historyRepository;
     private final StockReservationRepository reservationRepository;
 
+    private final ConfigurationGovernanceService
+        configurationService;
+
     private final InventoryAlertService inventoryAlertService;
     private final TimeSlotService timeSlotService;
     private final VirtualQueueService virtualQueueService;
@@ -149,6 +159,7 @@ public class OrderService {
         OrderItemRepository orderItemRepository,
         OrderStatusHistoryRepository historyRepository,
         StockReservationRepository reservationRepository,
+        ConfigurationGovernanceService configurationService,
         InventoryAlertService inventoryAlertService,
         TimeSlotService timeSlotService,
         VirtualQueueService virtualQueueService,
@@ -198,6 +209,9 @@ public class OrderService {
 
         this.reservationRepository =
             reservationRepository;
+
+        this.configurationService =
+            configurationService;
 
         this.inventoryAlertService =
             inventoryAlertService;
@@ -303,7 +317,10 @@ public class OrderService {
 
             if (
                 activeOrders
-                    >= MAX_ACTIVE_ORDERS
+                    >= maxActiveOrders(
+                        context.organizationId(),
+                        location
+                    )
             ) {
                 throw new OrderConflictException(
                     "Maximum active order limit reached."
@@ -602,7 +619,9 @@ public class OrderService {
                 == null
                     ? OffsetDateTime.now()
                         .plusMinutes(
-                            PAYMENT_TTL_MINUTES
+                            paymentTtlMinutes(
+                        order
+                    )
                         )
                     : timeSlotService
                         .paymentDeadline(
@@ -651,6 +670,280 @@ public class OrderService {
         );
     }
 
+
+    @Transactional
+    public OrderMutationResponse confirm(
+        UUID actorId,
+        UUID orderId,
+        String idempotencyKey
+    ) {
+
+        requireContractIdempotencyKey(
+            idempotencyKey
+        );
+
+        ActorContext context =
+            mobileStudent(
+                actorId
+            );
+
+        /*
+         * Serialize confirm against every other mutation on
+         * this order. submit() and beginPayment() acquire the
+         * same advisory transaction lock again safely.
+         */
+        lockOrder(
+            orderId
+        );
+
+        Order order =
+            lockedOwnedOrder(
+                orderId,
+                context
+            );
+
+        OrderStatus status =
+            order.getStatus();
+
+        boolean confirmedOrBeyond =
+            status == OrderStatus.AWAITING_PAYMENT
+                || status == OrderStatus.PAID
+                || status == OrderStatus.QUEUED
+                || status == OrderStatus.PREPARING
+                || status == OrderStatus.READY
+                || status == OrderStatus.COLLECTED
+                || status == OrderStatus.COMPLETED
+                || status == OrderStatus.REFUNDED
+                || status == OrderStatus.NO_SHOW;
+
+        if (confirmedOrBeyond) {
+
+            return new OrderMutationResponse(
+                response(
+                    order
+                ),
+                true
+            );
+        }
+
+        if (status == OrderStatus.DRAFT) {
+
+            submit(
+                actorId,
+                orderId
+            );
+
+            return beginPayment(
+                actorId,
+                orderId
+            );
+        }
+
+        if (status == OrderStatus.CREATED) {
+
+            return beginPayment(
+                actorId,
+                orderId
+            );
+        }
+
+        throw new OrderConflictException(
+            "Order cannot be confirmed from status "
+                + status
+                + "."
+        );
+    }
+    @Transactional
+    public OrderMutationResponse collect(
+        UUID actorId,
+        UUID orderId,
+        String idempotencyKey
+    ) {
+
+        requireContractIdempotencyKey(
+            idempotencyKey
+        );
+
+        if (actorId == null) {
+
+            throw new BadCredentialsException(
+                "Authenticated user does not exist."
+            );
+        }
+
+        User actor =
+            userRepository
+                .findById(
+                    actorId
+                )
+                .orElseThrow(() ->
+                    new BadCredentialsException(
+                        "Authenticated user does not exist."
+                    )
+                );
+
+        boolean actorActive =
+            "ACTIVE".equals(
+                actor.getStatus()
+                    .name()
+            );
+
+        boolean organizationActive =
+            actor.getOrganization()
+                .isActive();
+
+        if (!actorActive || !organizationActive) {
+
+            throw new BadCredentialsException(
+                "Authenticated user is inactive."
+            );
+        }
+
+        UUID organizationId =
+            actor.getOrganization()
+                .getId();
+
+        /*
+         * Same advisory lock used by all Order mutations.
+         * This serializes COLLECT against READY->NO_SHOW.
+         */
+        lockOrder(
+            orderId
+        );
+
+        Order order =
+            orderRepository
+                .findOwnedByIdForUpdate(
+                    orderId,
+                    organizationId
+                )
+                .orElseThrow(() ->
+                    new OrderNotFoundException(
+                        "Order does not exist."
+                    )
+                );
+
+        if (order.getStatus() == OrderStatus.COLLECTED) {
+
+            return new OrderMutationResponse(
+                response(
+                    order
+                ),
+                true
+            );
+        }
+
+        if (order.getStatus() == OrderStatus.COMPLETED) {
+
+            return new OrderMutationResponse(
+                response(
+                    order
+                ),
+                true
+            );
+        }
+
+        if (order.getStatus() != OrderStatus.READY) {
+
+            throw new OrderConflictException(
+                "Only a READY order can be collected."
+            );
+        }
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        OrderStatus from =
+            order.getStatus();
+
+        order.markCollected(
+            now
+        );
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                from,
+                OrderStatus.COLLECTED,
+                actor,
+                "Order handed over.",
+                OrderStatusHistorySource.API
+            )
+        );
+
+        orderRepository.saveAndFlush(
+            order
+        );
+
+        return new OrderMutationResponse(
+            response(
+                order
+            ),
+            false
+        );
+    }
+
+    @Transactional
+    public boolean completeSystem(
+        UUID organizationId,
+        UUID orderId
+    ) {
+
+        if (organizationId == null || orderId == null) {
+            return false;
+        }
+
+        lockOrder(
+            orderId
+        );
+
+        Order order =
+            orderRepository
+                .findOwnedByIdForUpdate(
+                    orderId,
+                    organizationId
+                )
+                .orElse(null);
+
+        if (order == null) {
+            return false;
+        }
+
+        if (order.getStatus() == OrderStatus.COMPLETED) {
+            return false;
+        }
+
+        if (order.getStatus() != OrderStatus.COLLECTED) {
+            return false;
+        }
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        OrderStatus from =
+            order.getStatus();
+
+        order.markCompleted(
+            now
+        );
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                from,
+                OrderStatus.COMPLETED,
+                null,
+                "Collected order finalized automatically.",
+                OrderStatusHistorySource.SYSTEM
+            )
+        );
+
+        orderRepository.saveAndFlush(
+            order
+        );
+
+        return true;
+    }
     @Transactional
     public OrderMutationResponse cancel(
         UUID actorId,
@@ -863,6 +1156,204 @@ public class OrderService {
         );
     }
 
+
+    @Transactional
+    public boolean expireSystem(
+        UUID organizationId,
+        UUID orderId
+    ) {
+
+        if (
+            organizationId == null
+            || orderId == null
+        ) {
+            throw new IllegalArgumentException(
+                "organizationId and orderId are required."
+            );
+        }
+
+        lockOrder(
+            orderId
+        );
+
+        Order order =
+            orderRepository
+                .findOwnedByIdForUpdate(
+                    orderId,
+                    organizationId
+                )
+                .orElse(null);
+
+        if (order == null) {
+            return false;
+        }
+
+        if (
+            order.getStatus()
+                != OrderStatus.AWAITING_PAYMENT
+        ) {
+            return false;
+        }
+
+        OffsetDateTime expiresAt =
+            order.getPaymentExpiresAt();
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        if (
+            expiresAt == null
+            || now.isBefore(
+                expiresAt
+            )
+        ) {
+            return false;
+        }
+
+        boolean released =
+            releaseReservations(
+                order,
+                null,
+                true
+            );
+
+        if (
+            order.getSlotId()
+                != null
+        ) {
+
+            timeSlotService
+                .releaseExpiredSystem(
+                    organizationId,
+                    order.getId(),
+                    order.getSlotId(),
+                    order.getLocation()
+                        .getId()
+                );
+        }
+
+        OrderStatus from =
+            order.getStatus();
+
+        order.markExpired();
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                from,
+                OrderStatus.EXPIRED,
+                null,
+                "Payment window expired automatically.",
+                OrderStatusHistorySource.SYSTEM
+            )
+        );
+
+        orderRepository
+            .saveAndFlush(
+                order
+            );
+
+        if (released) {
+
+            inventoryAlertService
+                .reconcileOrganization(
+                    organizationId
+                );
+        }
+
+        return true;
+    }
+
+    @Transactional
+    public boolean markNoShowSystem(
+        UUID organizationId,
+        UUID orderId
+    ) {
+
+        if (
+            organizationId == null
+            || orderId == null
+        ) {
+            throw new IllegalArgumentException(
+                "organizationId and orderId are required."
+            );
+        }
+
+        lockOrder(
+            orderId
+        );
+
+        Order order =
+            orderRepository
+                .findOwnedByIdForUpdate(
+                    orderId,
+                    organizationId
+                )
+                .orElse(null);
+
+        if (order == null) {
+            return false;
+        }
+
+        if (
+            order.getStatus()
+                != OrderStatus.READY
+        ) {
+            return false;
+        }
+
+        OffsetDateTime readyAt =
+            order.getReadyAt();
+
+        if (readyAt == null) {
+
+            throw new IllegalStateException(
+                "READY order is missing ready_at."
+            );
+        }
+
+        int toleranceMinutes =
+            noShowToleranceMinutes(
+                order
+            );
+
+        OffsetDateTime deadline =
+            readyAt.plusMinutes(
+                toleranceMinutes
+            );
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        if (now.isBefore(deadline)) {
+            return false;
+        }
+
+        OrderStatus from =
+            order.getStatus();
+
+        order.markNoShow(
+            now
+        );
+
+        historyRepository.save(
+            new OrderStatusHistory(
+                order,
+                from,
+                OrderStatus.NO_SHOW,
+                null,
+                "Pickup timeout reached automatically.",
+                OrderStatusHistorySource.SYSTEM
+            )
+        );
+
+        orderRepository
+            .saveAndFlush(
+                order
+            );
+
+        return true;
+    }
 
     @Transactional(readOnly = true)
     public PosDirectQuote quotePosDirect(
@@ -1095,7 +1586,9 @@ public class OrderService {
             OffsetDateTime
                 .now()
                 .plusMinutes(
-                    PAYMENT_TTL_MINUTES
+                    paymentTtlMinutes(
+                        order
+                    )
                 );
 
         reserveStock(
@@ -1137,6 +1630,192 @@ public class OrderService {
 
         return response(
             order
+        );
+    }
+    @Transactional(readOnly = true)
+    public List<ReadyOrderResponse> ready(
+        UUID locationId
+    ) {
+
+        if (locationId == null) {
+
+            throw new OrderValidationException(
+                "locationId is required."
+            );
+        }
+
+        return jdbcTemplate.query(
+            """
+            SELECT
+                food_order.order_number,
+                food_order.ready_at
+            FROM orders food_order
+            WHERE food_order.location_id = ?
+              AND food_order.status = 'READY'
+              AND food_order.ready_at IS NOT NULL
+            ORDER BY
+                food_order.ready_at ASC,
+                food_order.order_number ASC,
+                food_order.id ASC
+            """,
+            (
+                resultSet,
+                rowNumber
+            ) ->
+                new ReadyOrderResponse(
+                    resultSet.getString(
+                        "order_number"
+                    ),
+                    resultSet.getObject(
+                        "ready_at",
+                        OffsetDateTime.class
+                    )
+                ),
+            locationId
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public PagedOrdersResponse mine(
+        UUID actorId,
+        int page,
+        int size,
+        OrderStatus status
+    ) {
+
+        ActorContext context =
+            mobileStudent(
+                actorId
+            );
+
+        int safePage =
+            Math.max(
+                page,
+                0
+            );
+
+        int safeSize =
+            Math.min(
+                Math.max(
+                    size,
+                    1
+                ),
+                100
+            );
+
+        long offset =
+            (long) safePage
+                * safeSize;
+
+        String statusName =
+            status == null
+                ? null
+                : status.name();
+
+        Long total =
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM orders food_order
+                WHERE food_order.organization_id = ?
+                  AND food_order.student_id = ?
+                  AND (
+                        CAST(? AS VARCHAR) IS NULL
+                        OR food_order.status =
+                           CAST(? AS VARCHAR)
+                      )
+                """,
+                Long.class,
+                context.organizationId(),
+                context.student().getId(),
+                statusName,
+                statusName
+            );
+
+        long totalElements =
+            total == null
+                ? 0L
+                : total;
+
+        List<UUID> orderIds =
+            jdbcTemplate.query(
+                """
+                SELECT food_order.id
+                FROM orders food_order
+                WHERE food_order.organization_id = ?
+                  AND food_order.student_id = ?
+                  AND (
+                        CAST(? AS VARCHAR) IS NULL
+                        OR food_order.status =
+                           CAST(? AS VARCHAR)
+                      )
+                ORDER BY
+                    food_order.created_at DESC,
+                    food_order.id DESC
+                LIMIT ?
+                OFFSET ?
+                """,
+                (
+                    resultSet,
+                    rowNumber
+                ) ->
+                    resultSet.getObject(
+                        "id",
+                        UUID.class
+                    ),
+                context.organizationId(),
+                context.student().getId(),
+                statusName,
+                statusName,
+                safeSize,
+                offset
+            );
+
+        List<OrderResponse> content =
+            new ArrayList<>();
+
+        for (UUID id : orderIds) {
+
+            Order order =
+                orderRepository
+                    .findByIdAndOrganization_IdAndStudent_Id(
+                        id,
+                        context.organizationId(),
+                        context.student().getId()
+                    )
+                    .orElseThrow(() ->
+                        new OrderNotFoundException(
+                            "Order does not exist."
+                        )
+                    );
+
+            content.add(
+                response(
+                    order
+                )
+            );
+        }
+
+        int totalPages =
+            totalElements == 0L
+                ? 0
+                : (int) (
+                    (
+                        totalElements
+                            + safeSize
+                            - 1L
+                    )
+                        / safeSize
+                );
+
+        return new PagedOrdersResponse(
+            List.copyOf(
+                content
+            ),
+            safePage,
+            safeSize,
+            totalElements,
+            totalPages
         );
     }
     @Transactional(readOnly = true)
@@ -2441,6 +3120,109 @@ public class OrderService {
         );
     }
 
+    private int paymentTtlMinutes(
+        Order order
+    ) {
+
+        return configuredPositiveInteger(
+            order.getOrganization()
+                .getId(),
+            order.getCampus()
+                .getId(),
+            order.getLocation()
+                .getId(),
+            PAYMENT_TTL_SETTING
+        );
+    }
+
+    private int maxActiveOrders(
+        UUID organizationId,
+        Location location
+    ) {
+
+        return configuredPositiveInteger(
+            organizationId,
+            location.getCampus()
+                .getId(),
+            location.getId(),
+            MAX_ACTIVE_ORDERS_SETTING
+        );
+    }
+
+    private int noShowToleranceMinutes(
+        Order order
+    ) {
+
+        return configuredPositiveInteger(
+            order.getOrganization()
+                .getId(),
+            order.getCampus()
+                .getId(),
+            order.getLocation()
+                .getId(),
+            NO_SHOW_TOLERANCE_SETTING
+        );
+    }
+
+    private int configuredPositiveInteger(
+        UUID organizationId,
+        UUID campusId,
+        UUID locationId,
+        String settingKey
+    ) {
+
+        var resolved =
+            configurationService
+                .resolveSetting(
+                    organizationId,
+                    campusId,
+                    locationId,
+                    settingKey
+                );
+
+        String valueJson =
+            resolved.valueJson();
+
+        if (
+            valueJson == null
+            || valueJson.isBlank()
+        ) {
+            throw new IllegalStateException(
+                "Configured setting has no value: "
+                    + settingKey
+            );
+        }
+
+        int value;
+
+        try {
+
+            value =
+                Integer.parseInt(
+                    valueJson.trim()
+                );
+
+        }
+        catch (NumberFormatException exception) {
+
+            throw new IllegalStateException(
+                "Configured setting must be an integer: "
+                    + settingKey,
+                exception
+            );
+        }
+
+        if (value <= 0) {
+
+            throw new IllegalStateException(
+                "Configured setting must be positive: "
+                    + settingKey
+            );
+        }
+
+        return value;
+    }
+
     private Location ownedActiveLocation(
         UUID locationId,
         UUID organizationId
@@ -2543,6 +3325,37 @@ public class OrderService {
             );
     }
 
+    private String requireContractIdempotencyKey(
+        String rawKey
+    ) {
+
+        if (rawKey == null) {
+
+            throw new OrderValidationException(
+                "Idempotency-Key header is required."
+            );
+        }
+
+        String key =
+            rawKey.trim();
+
+        if (
+            key.length() < 8
+                || key.length() > 160
+        ) {
+
+            throw new OrderValidationException(
+                "Idempotency-Key length must be between 8 and 160 characters."
+            );
+        }
+
+        /*
+         * confirm has no mutable request body. The order
+         * state machine itself therefore supplies replay
+         * safety while the header remains contract-required.
+         */
+        return key;
+    }
     private OrderResponse response(
         Order order
     ) {

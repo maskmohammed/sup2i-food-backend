@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: ${SUP2I_DB_URL:jdbc:postgresql://localhost:5432/sup2i_food}
+    username: ${SUP2I_DB_USER:sup2i_food}
+    password: ${SUP2I_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never

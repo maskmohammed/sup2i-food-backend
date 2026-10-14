@@ -63,7 +63,7 @@ public class CanteenController {
 
     @GetMapping("/menus")
     @PreAuthorize(
-        "hasAuthority('canteen.menu.read')"
+        "@scopedAuthorization.hasLocationPermission(authentication, 'canteen.menu.read', #locationId)"
     )
     public List<CanteenMenuResponse> menus(
         JwtAuthenticationToken authentication,
@@ -99,7 +99,7 @@ public class CanteenController {
     @PostMapping("/reservations")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize(
-        "hasAuthority('canteen.reserve')"
+        "@scopedAuthorization.hasMenuPermission(authentication, 'canteen.reserve', #request.menuId())"
     )
     public CanteenReservationResponse reserve(
         JwtAuthenticationToken authentication,
@@ -130,7 +130,7 @@ public class CanteenController {
     @PostMapping("/distributions")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize(
-        "hasAuthority('canteen.distribute')"
+        "@scopedAuthorization.hasDistributionPermission(authentication, 'canteen.distribute', #request.terminalId(), #request.menuId())"
     )
     public MealUsageResponse distribute(
         JwtAuthenticationToken authentication,
